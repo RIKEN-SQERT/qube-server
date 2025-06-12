@@ -2,7 +2,7 @@ import numpy as np
 
 from labrad import types as T
 
-from constants import QSConstants
+from .constants import QSConstants
 
 
 def test_control_ch(device_name):

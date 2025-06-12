@@ -1,55 +1,41 @@
 # qube-server
 
-This project sets up QubeServer and quelware and LabRAD servers using Docker on Linux systems, configured for QuBE environments.
-
-## Requirements
-
-1. Docker and Docker Compose
-2. Linux (not ARM architecture)
-3. GitHub token (with access to private repos)
+A labRAD server for QuBE environments
 
 ## Getting Started
 
-Clone this repository to your Linux machine:
+### 1. Clone this repository:
+
+Clone this repository to your local machine:
 
 ```bash
-git clone https://github.com/qiqb-osaka/qube-server
+git clone https://github.com/qipe-nlab/qube-server
 ```
 
-### Configuration
+### 2. Download prebuilt dependencies
 
-This Docker Compose file requires an environment variable, `GITHUB_TOKEN`. This is a GitHub token which is needed to clone private repos.
-
-You can set this environment variable on your machine, for instance, by adding it to your `.bashrc` file:
+run the provided script to download and extract prebuilt packages required by the server:
 
 ```bash
-export GITHUB_TOKEN=your-token
+./download_and_extract_prebuilt.sh
 ```
 
-Alternatively, you can use a `.env` file in the project directory and Docker Compose will automatically use it.
+### 3. Prepare virtual environment
 
-*Be careful not to commit your personal GitHub token to the repository.*
-
-### Building and Running the Services
-
-Navigate to the project directory and build and run the services with Docker Compose:
+Use `uv` to create a virtual environment and install all the necessary Python dependencies from the lockfile:
 
 ```bash
-cd qube-server
-cd docker/lib && sh setup.sh && cd ..
-
-# add executable
-chmod +x script/*.sh
-
-# build all services
-docker compose build
-
-# run all services
-docker compose up -d
+uv sync
 ```
 
-## Services
+Make sure you have uv installed.
+If you don't have it yet, please follow the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
-This project includes following services:
 
-1. `labrad`: LabRAD server with QuBE device servers installed. The server data is persisted in the `labrad` Docker volume. It communicates over the host's network and listens on port 7682. You can configure the port in the `docker-compose.yml` file.
+### 4. execute the server
+
+Finally, you can start the server with the following command:
+
+```bash
+uv run qube_server
+```

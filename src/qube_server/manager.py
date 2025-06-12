@@ -13,8 +13,8 @@ from quel_clock_master import (
 )  # for multi-sync operation
 import qubelsi.qube
 
-from constants import QSConstants, QSMessage
-from utils import pingger
+from .constants import QSConstants, QSMessage
+from .utils import pingger
 
 ############################################################
 #

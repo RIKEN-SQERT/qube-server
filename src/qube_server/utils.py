@@ -6,7 +6,7 @@ import json
 from e7awgsw import CaptureCtrl
 from e7awgsw.memorymap import CaptureMasterCtrlRegs
 
-from constants import QSConstants
+from .constants import QSConstants
 
 ############################################################
 #

@@ -4,10 +4,10 @@ import numpy as np
 from labrad.server import setting
 from twisted.internet.defer import inlineCallbacks, returnValue
 
-from constants import QSConstants, QSMessage
-from devices import QuBE_Control_FPGA, QuBE_Control_LSI, QuBE_ControlLine, QuBE_ReadoutLine
+from .constants import QSConstants, QSMessage
+from .devices import QuBE_Control_FPGA, QuBE_Control_LSI, QuBE_ControlLine, QuBE_ReadoutLine
 
-from server import QuBE_Server
+from .server import QuBE_Server
 
 class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
 

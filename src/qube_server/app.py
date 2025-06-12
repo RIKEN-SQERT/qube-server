@@ -11,10 +11,10 @@ from labrad.units import ns, us
 
 #from plotly import graph_objects as go
 
-from constants import QSConstants
-from server import QuBE_Server
+from .constants import QSConstants
+from .server import QuBE_Server
 #from manager import QuBE_Manager_Server
-from helper import QuBE_Server_debug_otasuke
+from .helper import QuBE_Server_debug_otasuke
 
 ############################################################
 #
@@ -201,7 +201,7 @@ except KeyError as e:
 if server_select is None:
     __server__ = QuBE_Server_debug_otasuke()
 
-if __name__ == "__main__":
+def main():
     # Import Psyco if available
     #  try:
     #    import psyco
@@ -213,3 +213,6 @@ if __name__ == "__main__":
     #    del sys.argv[1:]
     print("new qube server start.")
     util.runServer(__server__)
+
+if __name__ == "__main__":
+    main()

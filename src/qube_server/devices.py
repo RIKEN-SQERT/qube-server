@@ -15,7 +15,7 @@ from e7awgsw import (
 
 from quel_ic_config import Quel1Box
 
-from constants import QSConstants, QSMessage
+from .constants import QSConstants, QSMessage
 
 ############################################################
 #

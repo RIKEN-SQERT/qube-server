@@ -141,3 +141,5 @@ docker/config/
 notebooks/
 
 qubesrv/config/
+
+.prebuilt

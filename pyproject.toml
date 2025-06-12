@@ -1,0 +1,24 @@
+[project]
+name = "qube-server"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "e7awgsw",
+    "quel-clock-master",
+    "quel-ic-config",
+]
+
+[project.scripts]
+qube_server = "qube_server.app:main"
+
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.uv.sources]
+quel-clock-master = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_clock_master", rev = "maintenance/0.8.x" }
+e7awgsw = { path = ".prebuilt/dependency_pkgs/simplemulti_standard/e7awgsw-1.0.0-py3-none-any.whl" }
+quel-ic-config = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_ic_config", rev = "maintenance/0.8.x" }
