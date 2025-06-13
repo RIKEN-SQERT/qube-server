@@ -2,19 +2,19 @@
 
 import os
 
-import numpy as np
-
 import labrad
-from labrad import types as T, util
+import numpy as np
+from labrad import types as T
+from labrad import util
 from labrad.units import ns, us
 
-
-#from plotly import graph_objects as go
-
+# from plotly import graph_objects as go
 from .constants import QSConstants
-from .server import QuBE_Server
-#from manager import QuBE_Manager_Server
+
+# from manager import QuBE_Manager_Server
 from .helper import QuBE_Server_debug_otasuke
+from .server import QuBE_Server
+
 
 ############################################################
 #
@@ -38,9 +38,7 @@ def usage():
     [(qs.select_device(i), qs.shots(1)) for i in devices]
     [(qs.select_device(i), qs.daq_length(Twaveform * us)) for i in devices]
     [(qs.select_device(i), qs.repetition_time(2 * Twaveform * us)) for i in devices]
-    data = np.exp(
-        1j * 2 * np.pi * (freq / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)
-    ) * (1 - 1e-3)
+    data = np.exp(1j * 2 * np.pi * (freq / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)) * (1 - 1e-3)
     # This set spositive frequency shift
     # of {freq} MHz for upper sideband modu-
     # lation. For control, we use lower-
@@ -195,11 +193,12 @@ try:
         __server__ = QuBE_Server()
     else:
         server_select = None
-except KeyError as e:
+except KeyError:
     server_select = None
 
 if server_select is None:
     __server__ = QuBE_Server_debug_otasuke()
+
 
 def main():
     # Import Psyco if available
@@ -213,6 +212,7 @@ def main():
     #    del sys.argv[1:]
     print("new qube server start.")
     util.runServer(__server__)
+
 
 if __name__ == "__main__":
     main()

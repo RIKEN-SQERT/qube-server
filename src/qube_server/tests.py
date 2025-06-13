@@ -1,5 +1,4 @@
 import numpy as np
-
 from labrad import types as T
 
 from .constants import QSConstants
@@ -13,9 +12,7 @@ def test_control_ch(device_name):
     qs = cxn.qube_server
 
     nsample = 4 * 5120
-    data = np.exp(
-        1j * 2 * np.pi * (0 / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)
-    ) * (1 - 1e-3)
+    data = np.exp(1j * 2 * np.pi * (0 / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)) * (1 - 1e-3)
 
     qs.select_device(device_name)  # 'qube004-control_6'
 
@@ -45,9 +42,7 @@ def test_control_ch_bandwidth(device_name):
     qs = cxn.qube_server
 
     nsample = 4 * 5120
-    data = np.exp(
-        1j * 2 * np.pi * (0 / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)
-    ) * (1 - 1e-3)
+    data = np.exp(1j * 2 * np.pi * (0 / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)) * (1 - 1e-3)
 
     qs.select_device(device_name)  # 'qube004-control_6'
 
@@ -84,18 +79,19 @@ def test_control_ch_bandwidth(device_name):
 
 
 def test_readout_ch_bandwidth_and_spurious(device_name):
-
     # from labrad.units import ns, us
-    import labrad
-    import time
     import pickle
+    import time
+
+    import labrad
 
     def spectrum_analyzer_get():
         import socket
-        import numpy as np
 
         # import pickle
         import struct
+
+        import numpy as np
 
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(1)
@@ -106,7 +102,7 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
             try:
                 r = sock.recv(1024)
                 rdat = rdat + r
-            except Exception as e:
+            except Exception:
                 break
         sock.close()
         y = np.array(struct.unpack("<501d", rdat[6:]))
@@ -116,9 +112,7 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
     qs = cxn.qube_server
 
     nsample = 4 * 5120  # 4 x 10.24us = 40.96us
-    phase_factor = (
-        2 * np.pi * (-189 / 1.024 / QSConstants.DACBB_SAMPLE_R)
-    )  # 2pi x normalized frequency
+    phase_factor = 2 * np.pi * (-189 / 1.024 / QSConstants.DACBB_SAMPLE_R)  # 2pi x normalized frequency
     data = np.exp(1j * phase_factor * np.arange(nsample)) * (1 - 1e-3)
 
     qs.select_device(device_name)  # 'qube004-control_6'
@@ -126,9 +120,7 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
     qs.shots(6 * 1000 * 25)  # 6 seconds
     qs.daq_timeout(T.Value(30, "s"))
     qs.daq_length(T.Value(2 * nsample, "ns"))
-    qs.repetition_time(
-        T.Value(4 * 10.24, "us")
-    )  # identical to the daq_length = CW operation
+    qs.repetition_time(T.Value(4 * 10.24, "us"))  # identical to the daq_length = CW operation
 
     qs.upload_parameters([0])
     qs.upload_waveform([data], [0])
@@ -183,7 +175,6 @@ def test_readout_ch_bandwidth_and_spurious(device_name):
 
 
 def test_timing_calib(cxn, device_name):
-
     class TCConstants:
         QUBE_SRV_TAG = "qube_server"
         CALIB_SHOT = 1
@@ -198,7 +189,6 @@ def test_timing_calib(cxn, device_name):
         INVALID_DEVICE = "Invalid device pair: {}."
 
     class TimingSyncCalibrator:
-
         def __init__(self, cxn, device_name):
             if isinstance(device_name, tuple):
                 resp = self.check_chassis_name(device_name)
@@ -211,9 +201,7 @@ def test_timing_calib(cxn, device_name):
                 print(TCMessages.INVALID_DEVICE.format(device_name))
 
         def check_chassis_name(self, device_name):
-            chassisA, chassisB = tuple(
-                [_device.split("-")[0] for _device in device_name]
-            )
+            chassisA, chassisB = tuple([_device.split("-")[0] for _device in device_name])
             if chassisA == chassisB:
                 return False
             return True
@@ -225,13 +213,8 @@ def test_timing_calib(cxn, device_name):
                 self._ql.daq_length(TCConstants.CALIB_BURST)
                 self._ql.repetition_time(TCConstants.CALIB_REPT)
 
-                self._ql.frequency_local(
-                    TCConstants.CALIB_FREQ
-                    - TCConstants.CALIB_FCNCO
-                    - TCConstants.CALIB_FFNCO
-                )
+                self._ql.frequency_local(TCConstants.CALIB_FREQ - TCConstants.CALIB_FCNCO - TCConstants.CALIB_FFNCO)
                 self._ql.frequency_tx_nco(TCConstants.FCNCO)
                 self._ql.frequency_tx_fine_nco(0, TCConstants.FFNCO)
 
-    tc = TimingSyncCalibrator(cxn, device_name)
-
+    TimingSyncCalibrator(cxn, device_name)

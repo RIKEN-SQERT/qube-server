@@ -1,17 +1,15 @@
-import sys
 import json
 import struct
+import sys
 
-from labrad import types as T
-from labrad.devices import DeviceWrapper, DeviceServer
+import qubelsi.qube
+from labrad.devices import DeviceServer, DeviceWrapper
 from labrad.server import setting
-from twisted.internet.defer import inlineCallbacks, returnValue
-
 from quel_clock_master import (
     QuBEMasterClient,
     SequencerClient,
 )  # for multi-sync operation
-import qubelsi.qube
+from twisted.internet.defer import inlineCallbacks, returnValue
 
 from .constants import QSConstants, QSMessage
 from .utils import pingger
@@ -29,8 +27,8 @@ from .utils import pingger
 
 REGAPIPATH = "adi_api_path"
 
-class QuBE_Manager_Device(DeviceWrapper):
 
+class QuBE_Manager_Device(DeviceWrapper):
     @inlineCallbacks
     def connect(self, *args, **kw):  # @inlineCallbacks
         name, role = args
@@ -49,18 +47,11 @@ class QuBE_Manager_Device(DeviceWrapper):
     @inlineCallbacks
     def initialize(self):  # @inlineCallbacks
         yield self._lsi_ctrl.do_init(rf_type=self._role, message_out=self.verbose)
-        mixer_init = [
-            (ch[QSConstants.CNL_MIXCH_TAG], ch[QSConstants.CNL_MIXSB_TAG])
-            for ch in self._channel_info
-        ]
+        mixer_init = [(ch[QSConstants.CNL_MIXCH_TAG], ch[QSConstants.CNL_MIXSB_TAG]) for ch in self._channel_info]
 
         for ch, usb_lsb in mixer_init:  # Upper or lower sideband configuration
-            if (
-                usb_lsb == QSConstants.CNL_MXUSB_VAL
-            ):  # in the active IQ mixer. The output
-                yield self._lsi_ctrl.adrf6780[
-                    ch
-                ].set_usb()  # become small with a wrong sideband
+            if usb_lsb == QSConstants.CNL_MXUSB_VAL:  # in the active IQ mixer. The output
+                yield self._lsi_ctrl.adrf6780[ch].set_usb()  # become small with a wrong sideband
             elif usb_lsb == QSConstants.CNL_MXLSB_VAL:  # setting.
                 yield self._lsi_ctrl.adrf6780[ch].set_lsb()
 
@@ -83,7 +74,6 @@ class QuBE_Manager_Device(DeviceWrapper):
 
     @inlineCallbacks
     def read_adconverter_jesd_status(self):
-
         NUMBER_OF_ADCS_IN_A_CHASSIS = 2
 
         adc = self._lsi_ctrl.ad9082
@@ -109,7 +99,6 @@ class QuBE_Manager_Device(DeviceWrapper):
 
     @inlineCallbacks
     def synchronize_with_master(self):  # @inlineCallbacks
-
         func, srv = self._sync_func
         result = yield func(srv, self._sync_addr)
         if result:
@@ -140,9 +129,7 @@ class QuBE_Manager_Server(DeviceServer):
             self.master_link = yield reg.get(QSConstants.REGMASTERLNK)
             self.adi_api_path = yield reg.get(REGAPIPATH)
 
-            self._master_ctrl = yield QuBEMasterClient(
-                self.master_link, receiver_limit_by_bind=True
-            )
+            self._master_ctrl = yield QuBEMasterClient(self.master_link, receiver_limit_by_bind=True)
             self.__is_clock_opened = True
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
@@ -165,7 +152,6 @@ class QuBE_Manager_Server(DeviceServer):
 
     @inlineCallbacks
     def findDevices(self):  # @inlineCallbacks
-        cxn = self.client
         found = list()
 
         for _name, _type, _iplsi, _ipclk, _channel in self.possibleLinks:
@@ -188,9 +174,7 @@ class QuBE_Manager_Server(DeviceServer):
         returnValue(found)
 
     @inlineCallbacks
-    def instantiateQube(
-        self, name, role, iplsi, ipclk, channel_info
-    ):  # @inlineCallbacks
+    def instantiateQube(self, name, role, iplsi, ipclk, channel_info):  # @inlineCallbacks
         lsi_ctrl = yield qubelsi.qube.Qube(iplsi, self.adi_api_path)
         sync_ctrl = yield SequencerClient(ipclk, receiver_limit_by_bind=True)
         args = (name, role)
@@ -297,9 +281,7 @@ class QuBE_Manager_Server(DeviceServer):
         if self.__is_clock_opened:
             del self._master_ctrl
 
-        self._master_ctrl = QuBEMasterClient(
-            self.master_link, receiver_limit_by_bind=True
-        )
+        self._master_ctrl = QuBEMasterClient(self.master_link, receiver_limit_by_bind=True)
         self.__is_clock_opened = True
 
         return True
@@ -321,7 +303,7 @@ class QuBE_Manager_Server(DeviceServer):
 
         resp = False
         try:
-            ret = yield self._master_ctrl.clear_clock()
+            yield self._master_ctrl.clear_clock()
             resp = True
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
@@ -342,8 +324,8 @@ class QuBE_Manager_Server(DeviceServer):
                 words of the clock value represented in 64-bit unsigned int.
         """
         resp = yield self._read_master_clock()
-        h = (resp & 0xFFFFFFFF00000000) >> 32
-        l = resp & 0xFFFFFFFF
+        h = (resp & 0xFFFFFFFF00000000) >> 32  # noqa: E741
+        l = resp & 0xFFFFFFFF  # noqa: E741
         returnValue((h, l))
 
     @setting(305, "Read Chassis Clock", returns=["ww"])
@@ -360,8 +342,8 @@ class QuBE_Manager_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         resp = yield dev.read_chassis_clock()
-        h = (resp & 0xFFFFFFFF00000000) >> 32
-        l = resp & 0xFFFFFFFF
+        h = (resp & 0xFFFFFFFF00000000) >> 32  # noqa
+        l = resp & 0xFFFFFFFF  # noqa
         returnValue((h, l))
 
     @setting(304, "Synchronize Clock", returns=["b"])
@@ -382,7 +364,6 @@ class QuBE_Manager_Server(DeviceServer):
 
     @inlineCallbacks
     def _synchronize_with_master_clock(self, target_addr):  # @inlineCallbacks
-
         if not self.__is_clock_opened:
             raise Exception(QSMessage.ERR_DEV_NOT_OPEN)
 
@@ -403,7 +384,6 @@ class QuBE_Manager_Server(DeviceServer):
 
     @inlineCallbacks
     def _read_master_clock(self):  # @inlineCallbacks
-
         if not self.__is_clock_opened:
             raise Exception(QSMessage.ERR_DEV_NOT_OPEN)
 
@@ -464,4 +444,3 @@ class QuBE_Manager_Server(DeviceServer):
             print(sys._getframe().f_code.co_name, e)
 
         returnValue(resp)
-

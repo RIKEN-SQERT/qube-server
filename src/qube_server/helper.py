@@ -1,19 +1,17 @@
 import sys
-import numpy as np
 
+import numpy as np
 from labrad.server import setting
 from twisted.internet.defer import inlineCallbacks, returnValue
 
 from .constants import QSConstants, QSMessage
 from .devices import QuBE_Control_FPGA, QuBE_Control_LSI, QuBE_ControlLine, QuBE_ReadoutLine
-
 from .server import QuBE_Server
 
-class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
 
+class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
     @inlineCallbacks
     def get_connected(self, *args, **kw):
-
         yield super(QuBE_Device_debug_otasuke, self).get_connected(*args, **kw)
         self.__initialized = False
         try:
@@ -26,7 +24,6 @@ class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
 
     @inlineCallbacks
     def get_microwave_switch(self):
-
         mask = self.__switch_mask
         resp = self.__switch_ctrl.read_value()
         output = True
@@ -37,17 +34,16 @@ class QuBE_Device_debug_otasuke(QuBE_Control_FPGA, QuBE_Control_LSI):
 
     @inlineCallbacks
     def set_microwave_switch(self, output):
-
         mask = self.__switch_mask
         resp = self.__switch_ctrl.read_value()
-        if True == output:
+        if output:
             resp = resp & (0x3FFF ^ mask)
         else:
             resp = resp | mask
         yield self.__switch_ctrl.write_value(resp)
 
-class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
 
+class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke):
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
         super(QuBE_ControlLine_debug_otasuke, self).get_connected(*args, **kw)
@@ -55,7 +51,6 @@ class QuBE_ControlLine_debug_otasuke(QuBE_ControlLine, QuBE_Device_debug_otasuke
 
 
 class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke):
-
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
         super(QuBE_ReadoutLine_debug_otasuke, self).get_connected(*args, **kw)
@@ -63,7 +58,6 @@ class QuBE_ReadoutLine_debug_otasuke(QuBE_ReadoutLine, QuBE_Device_debug_otasuke
 
 
 class QuBE_Server_debug_otasuke(QuBE_Server):
-
     deviceWrappers = {
         QSConstants.CNL_READ_VAL: QuBE_ReadoutLine_debug_otasuke,
         QSConstants.CNL_CTRL_VAL: QuBE_ControlLine_debug_otasuke,
@@ -73,15 +67,11 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         QuBE_Server.__init__(self, *args, **kw)
 
     def instantiateChannel(self, name, channels, awg_ctrl, cap_ctrl, lsi_ctrl, info):
-        devices = super(QuBE_Server_debug_otasuke, self).instantiateChannel(
-            name, channels, awg_ctrl, cap_ctrl, lsi_ctrl, info
-        )
+        devices = super(QuBE_Server_debug_otasuke, self).instantiateChannel(name, channels, awg_ctrl, cap_ctrl, lsi_ctrl, info)
         revised = []
         for device, channel in zip(devices, channels):
             name, args, kw = device
-            _kw = dict(
-                gsw_ctrl=lsi_ctrl.gpio, gsw_mask=channel[QSConstants.CNL_GPIOSW_TAG]
-            )
+            _kw = dict(gsw_ctrl=lsi_ctrl.gpio, gsw_mask=channel[QSConstants.CNL_GPIOSW_TAG])
             kw.update(_kw)
             revised.append((name, args, kw))
         return revised
@@ -117,9 +107,7 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
             data  : w   Data. Read operation is performed if None
         """
         dev = self.selectedDevice(c)
-        reg = (
-            dev._awg_ctrl._AwgCtrl__reg_access
-        )  # DEBUG _awg_ctrl is a protected member
+        reg = dev._awg_ctrl._AwgCtrl__reg_access  # DEBUG _awg_ctrl is a protected member
         if data is None:
             data = reg.read_bits(addr, offset, pos, bits)
             return data
@@ -159,12 +147,8 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
-        reg = (
-            dev._cap_ctrl._CaptureCtrl__reg_access
-        )  # DEBUG _cap_ctrl is a protected member
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
+        reg = dev._cap_ctrl._CaptureCtrl__reg_access  # DEBUG _cap_ctrl is a protected member
         if data is None:
             data = reg.read_bits(addr, offset, pos, bits)
             return data
@@ -180,9 +164,7 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         sigma=["v[s]"],
         returns=["b"],
     )
-    def debug_auto_acquisition_fir_coefficients(
-        self, c, muxch, bb_frequency, sigma=None
-    ):
+    def debug_auto_acquisition_fir_coefficients(self, c, muxch, bb_frequency, sigma=None):
         """
         Automatically set finite impulse resoponse filter coefficients.
 
@@ -204,10 +186,7 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
             sigma = 3.0  # nanosecodnds
 
         freq_in_mhz = bb_frequency["MHz"]  # base-band frequency before decimation.
-        if (
-            -QSConstants.ADCBB_SAMPLE_R / 2.0 >= freq_in_mhz
-            or QSConstants.ADCBB_SAMPLE_R / 2.0 <= freq_in_mhz
-        ):
+        if -QSConstants.ADCBB_SAMPLE_R / 2.0 >= freq_in_mhz or QSConstants.ADCBB_SAMPLE_R / 2.0 <= freq_in_mhz:
             raise Exception(
                 QSMessage.ERR_INVALID_RANG.format(
                     "bb_frequency",
@@ -220,16 +199,9 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         band_idx = int(freq_in_mhz / band_step + 0.5 + n_of_band) - n_of_band
         band_center = band_step * band_idx
 
-        x = (
-            np.arange(QSConstants.ACQ_MAX_FCOEF) - (QSConstants.ACQ_MAX_FCOEF - 1) / 2
-        )  # symmetric in center.
+        x = np.arange(QSConstants.ACQ_MAX_FCOEF) - (QSConstants.ACQ_MAX_FCOEF - 1) / 2  # symmetric in center.
         gaussian = np.exp(-0.5 * x**2 / (sigma**2))  # gaussian with sigma of [sigma]
-        phase_factor = (
-            2
-            * np.pi
-            * (band_center / QSConstants.ADCBB_SAMPLE_R)
-            * np.arange(QSConstants.ACQ_MAX_FCOEF)
-        )
+        phase_factor = 2 * np.pi * (band_center / QSConstants.ADCBB_SAMPLE_R) * np.arange(QSConstants.ACQ_MAX_FCOEF)
         coeffs = gaussian * np.exp(1j * phase_factor) * (1 - 1e-3)
 
         return self.acquisition_fir_coefficients(c, muxch, coeffs)
@@ -274,17 +246,10 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         freq_in_mhz = bb_frequency["MHz"]  # Base-band frequency before decimation
 
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
-        elif (
-            -QSConstants.ADCBB_SAMPLE_R / 2.0 >= freq_in_mhz
-            or QSConstants.ADCBB_SAMPLE_R / 2.0 <= freq_in_mhz
-        ):
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        elif -QSConstants.ADCBB_SAMPLE_R / 2.0 >= freq_in_mhz or QSConstants.ADCBB_SAMPLE_R / 2.0 <= freq_in_mhz:
             raise Exception(
                 QSMessage.ERR_INVALID_RANG.format(
                     "bb_frequency",
@@ -293,15 +258,9 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
                 )
             )
 
-        decim_factor = int(
-            QSConstants.ADCBB_SAMPLE_R / QSConstants.ADCDCM_SAMPLE_R + 0.5
-        )
-        nsample = _max_window_length(dev.acquisition_window[muxch]) // (
-            decim_factor * QSConstants.ADC_BBSAMP_IVL
-        )
-        phase_factor = (
-            2 * np.pi * (freq_in_mhz / QSConstants.ADCDCM_SAMPLE_R) * np.arange(nsample)
-        )
+        decim_factor = int(QSConstants.ADCBB_SAMPLE_R / QSConstants.ADCDCM_SAMPLE_R + 0.5)
+        nsample = _max_window_length(dev.acquisition_window[muxch]) // (decim_factor * QSConstants.ADC_BBSAMP_IVL)
+        phase_factor = 2 * np.pi * (freq_in_mhz / QSConstants.ADCDCM_SAMPLE_R) * np.arange(nsample)
         coeffs = np.exp(-1j * phase_factor) * (1 - 1e-3)  # Rectangular window
 
         return self.acquisition_window_coefficients(c, muxch, coeffs)
@@ -324,4 +283,3 @@ class QuBE_Server_debug_otasuke(QuBE_Server):
         else:
             output = yield dev.get_microwave_switch()
         returnValue(output)
-

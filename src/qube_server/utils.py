@@ -1,12 +1,13 @@
-import os
-import sys
-import subprocess
 import json
+import os
+import subprocess
+import sys
 
 from e7awgsw import CaptureCtrl
 from e7awgsw.memorymap import CaptureMasterCtrlRegs
 
 from .constants import QSConstants
+
 
 ############################################################
 #
@@ -24,7 +25,6 @@ def pingger(host):
 # e7awgsw wrappers
 #
 class QuBECaptureCtrl(CaptureCtrl):
-
     def terminate_capture_units(self, *capture_unit_id_list):
         with self._CaptureCtrl__flock:
             self._CaptureCtrl__select_ctrl_target(*capture_unit_id_list)
@@ -51,6 +51,7 @@ class QuBECaptureCtrl(CaptureCtrl):
             )
             self._CaptureCtrl__deselect_ctrl_target(*capture_unit_id_list)
 
+
 ############################################################
 #
 # AUX SUBROUTINES FOR EASY SETUP
@@ -63,7 +64,6 @@ class QuBECaptureCtrl(CaptureCtrl):
 # > QubeServer.load_skew_zer(cxn)
 #
 def basic_config():
-
     _name_tag = QSConstants.CNL_NAME_TAG
     _type_tag = QSConstants.CNL_TYPE_TAG
     _control_val = QSConstants.CNL_CTRL_VAL
@@ -374,4 +374,3 @@ def load_skew_zero(cxn):
         reg.set(QSConstants.REGSKEW, json.dumps(skew))
     except Exception as e:
         print(sys._getframe().f_code.co_name, e)
-

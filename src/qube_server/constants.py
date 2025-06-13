@@ -1,5 +1,6 @@
 import numpy as np
 
+
 ############################################################
 #
 # CONSTANTS
@@ -10,16 +11,16 @@ class QSConstants:
     REGLNK = "possible_links"
     REGSKEW = "chassis_skew"
     REGMASTERLNK = "master_link"
-    #REGAPIPATH = "adi_api_path"
+    # REGAPIPATH = "adi_api_path"
     SRVNAME = "QuBE Server"
     MNRNAME = "QuBE Manager"
     ENV_SRVSEL = "QUBE_SERVER"
     THREAD_MAX_WORKERS = 32
-    #DAQ_MAXLEN = 199936  # nano-seconds -> 24,992 AWG Word
-    DAQ_MAXLEN = 134_217_728 # nano-seconds -> 2^26
-    #DAC_SAMPLE_R = 12000  # MHz
+    # DAQ_MAXLEN = 199936  # nano-seconds -> 24,992 AWG Word
+    DAQ_MAXLEN = 134_217_728  # nano-seconds -> 2^26
+    # DAC_SAMPLE_R = 12000  # MHz
     NCO_SAMPLE_F = 2000  # MHz, NCO frequency at main data path
-    #ADC_SAMPLE_R = 6000  # MHz
+    # ADC_SAMPLE_R = 6000  # MHz
     DACBB_SAMPLE_R = 500  # MHz, baseband sampling frequency
     ADCBB_SAMPLE_R = 500  # MHz, baseband sampling frequency
     ADCDCM_SAMPLE_R = 125  # MHz, decimated sampling frequency
@@ -33,7 +34,7 @@ class QSConstants:
     #    = 1/ADCBB_SAMPLE_R
     DAC_WORD_IVL = 8  # ns; DAC WORD in nanoseconds
     DAC_WORD_SAMPLE = 4  # Sample/(DAC word); DEBUG not used
-    #DAQ_CNCO_BITS = 48
+    # DAQ_CNCO_BITS = 48
     DAQ_LO_RESOL = 100  # - The minimum frequency resolution of
     #   the analog local oscillators in MHz.
     DAC_CNCO_RESOL = 12000 / 2**11  # - The frequency resolution of the
@@ -96,9 +97,7 @@ class QSConstants:
     DAQ_INITSDLY = 1  # seconds; synchronization delay
     ACQ_INITMODE = "3"
     ACQ_INITWINDOW = [(0, 2048)]  # initial demodulation windows
-    ACQ_INITFIRCOEF = np.array([1] * 8).astype(
-        complex
-    )  # initial complex FIR filter coeffs
+    ACQ_INITFIRCOEF = np.array([1] * 8).astype(complex)  # initial complex FIR filter coeffs
     ACQ_INITWINDCOEF = np.array([]).astype(complex)  # initial complex window coeffs
     SYNC_CLOCK = 125 * 1000 * 1000  # synchronization clock
     DAC_CNXT_TAG = "awgs"  # used in the device context
@@ -151,9 +150,7 @@ class QSMessage:
         + "(2) The number of channels are less than that of # of awgs. "
         + "(3) The sequence length in nano-second must be identical to "
         + "the value set by daq_length(). "
-        + "(4) The data length must be multiple of {}. ".format(
-            QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
-        )
+        + "(4) The data length must be multiple of {}. ".format(QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL)
         + "(5) The absolute value of complex data is less than 1. "
         + "The problem is {}. "
     )
@@ -161,4 +158,3 @@ class QSMessage:
 
     def __init__(self):
         pass
-

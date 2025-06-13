@@ -1,35 +1,31 @@
-import sys
+import concurrent.futures
 import json
-import concurrent
 import re
+import sys
+from typing import Any
 
 import numpy as np
-
+from e7awgsw import (
+    AWG,
+    AwgCtrl,
+    CaptureModule,
+)
 from labrad import types as T
+from labrad.concurrent import future_to_deferred
 from labrad.devices import DeviceServer
 from labrad.server import setting
 from labrad.units import Value
-from labrad.concurrent import future_to_deferred
+from quel_clock_master import (
+    SequencerClient,
+)
+from quel_ic_config import Quel1Box
+from quel_ic_config.e7resource_mapper import Quel1E7ResourceMapper
 from twisted.internet.defer import inlineCallbacks, returnValue
 
-from e7awgsw import (
-    AwgCtrl,
-    AWG,
-    CaptureModule,
-)
-from quel_clock_master import (
-    QuBEMasterClient,
-    SequencerClient,
-)  # for multi-sync operation
-
-from quel_ic_config import Quel1Box, Quel1BoxType
-from quel_ic_config.e7resource_mapper import Quel1E7ResourceMapper
-
 from .constants import QSConstants, QSMessage
-from .devices import QuBE_ReadoutLine, QuBE_ControlLine
-from .utils import pingger, QuBECaptureCtrl
-
+from .devices import QuBE_ControlLine, QuBE_ReadoutLine
 from .qube_box_setup_helper import QubeBoxInfo, QubePortMapper
+from .utils import QuBECaptureCtrl
 
 
 ############################################################
@@ -45,12 +41,15 @@ class QuBE_Server(DeviceServer):
     possibleLinks = {}
     chassisSkew = {}
 
+    def get_registry_service(self):
+        cxn: Any = self.client
+        return cxn[QSConstants.REGSRV]
+
     @inlineCallbacks
     def initServer(self):  # @inlineCallbacks
         yield DeviceServer.initServer(self)
 
-        cxn = self.client
-        reg = cxn[QSConstants.REGSRV]
+        reg = self.get_registry_service()
         try:
             yield reg.cd(QSConstants.REGDIR)
             config = yield reg.get(QSConstants.REGLNK)
@@ -64,9 +63,7 @@ class QuBE_Server(DeviceServer):
 
         try:
             max_workers = QSConstants.THREAD_MAX_WORKERS
-            self._thread_pool = concurrent.futures.ThreadPoolExecutor(
-                max_workers=max_workers
-            )  # for a threaded operation
+            self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)  # for a threaded operation
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
 
@@ -78,11 +75,7 @@ class QuBE_Server(DeviceServer):
         c[QSConstants.DAQ_SDLY_TAG] = QSConstants.DAQ_INITSDLY
 
     def chooseDeviceWrapper(self, *args, **kw):
-        tag = (
-            QSConstants.CNL_READ_VAL
-            if QSConstants.CNL_READ_VAL in args[2]
-            else QSConstants.CNL_CTRL_VAL
-        )
+        tag = QSConstants.CNL_READ_VAL if QSConstants.CNL_READ_VAL in args[2] else QSConstants.CNL_CTRL_VAL
         return self.deviceWrappers[tag]
 
     # QuEL-1 SE Riken8 の場合
@@ -98,9 +91,7 @@ class QuBE_Server(DeviceServer):
     # | 1       | 3     | (1, 3)         | 9     | Ctrl |
 
     def parse_qube_device_id(self, device_id):
-        devicd_id_regexp = re.compile(
-            r"(quel1se-1-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})"
-        )
+        devicd_id_regexp = re.compile(r"(quel1se-1-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})")
         m = devicd_id_regexp.match(device_id)
         if m:
             device_name = m.group(1)
@@ -110,7 +101,7 @@ class QuBE_Server(DeviceServer):
             raise ValueError(f"Cannot parse device_id: {device_id}")
         return device_name, port_type, port_string
 
-    def get_dac_group_line_from_name(self, box, pmaper, name):
+    def get_dac_group_line_from_name(self, box, pmaper, name) -> tuple[int, int]:
         _, role, port_string = self.parse_qube_device_id(name)
         # if role == "readout":
         #     for c in port_string:
@@ -122,20 +113,12 @@ class QuBE_Server(DeviceServer):
         #     port = int(port_string, 16)
         #     group, line = pmaper.resolve_line(port)
         # return group, line
-        
+
         # TODO: fogi
-        port_group_map = {
-            1: (0,0),
-            2: (0,2),
-            3: (0,3),   
-            6: (1,0),
-            7: (1,1),
-            8: (1,2),
-            9: (1,3)           
-        }
-        #print(f"get_dac_group_line_from_name port_string: {port_string} ")
+        port_group_map = {1: (0, 0), 2: (0, 2), 3: (0, 3), 6: (1, 0), 7: (1, 1), 8: (1, 2), 9: (1, 3)}
+        # print(f"get_dac_group_line_from_name port_string: {port_string} ")
         port = int(port_string)
-        return port_group_map.get(port)
+        return port_group_map[port]
 
     # def get_adc_group_line_from_name(self, box, pmaper, name):
     #     # _, role, port_string = self.parse_qube_device_id(name)
@@ -165,14 +148,9 @@ class QuBE_Server(DeviceServer):
         def gen_awg(name, role, chassis, channel, awg_ctrl, cap_ctrl):
             pmaper = QubePortMapper(box_type_str)
             group, line = self.get_dac_group_line_from_name(box, pmaper, name)
-            # TODO: rline type:B の場合は、rline = "m" にする？ そうでもないらしい。
-            try:
-                group, rline = self.get_dac_group_line_from_name(box, pmaper, name)
-            except:
-                rline = None
             awg_ch_ids = []
             # TODO: モニター
-            #rline = "m"
+            # rline = "m"
             rline = "r"
             # print(f"gen_awg() name: {name}, group: {group}, line: {line}, rline: {rline}")
             chs = box._dev.get_channels_of_line(group, line)
@@ -197,18 +175,16 @@ class QuBE_Server(DeviceServer):
             return (name, args, kw)
 
         def gen_mux(name, role, chassis, channel, awg_ctrl, cap_ctrl):
-            _name, _args, _kw = gen_awg(
-                name, role, chassis, channel, awg_ctrl, cap_ctrl
-            )
+            _name, _args, _kw = gen_awg(name, role, chassis, channel, awg_ctrl, cap_ctrl)
             pmaper = QubePortMapper(box_type_str)
             group, line = self.get_dac_group_line_from_name(box, pmaper, name)
-            #print(f"name: {name}, group: {group}, line: {line}")
+            # print(f"name: {name}, group: {group}, line: {line}")
             # TODO: モニター: こちらはモニターの場合でも"r"のままでよい
             cap_mod_id = rmap.get_capture_module_of_rline(group, "r")
-            #cap_mod_id = rmap.get_capture_module_of_rline(group, "m")
-            #print(f"cap_mod_id: {cap_mod_id}")
+            # cap_mod_id = rmap.get_capture_module_of_rline(group, "m")
+            # print(f"cap_mod_id: {cap_mod_id}")
             capture_units = CaptureModule.get_units(cap_mod_id)
-            #print(f"capture_units: {capture_units}")
+            # print(f"capture_units: {capture_units}")
 
             kw = dict(
                 cap_ctrl=cap_ctrl,
@@ -220,14 +196,14 @@ class QuBE_Server(DeviceServer):
 
         devices = []
         for channel in channels:
-            #print(f"instantiateChannel: {channel}")
+            # print(f"instantiateChannel: {channel}")
             channel_type = channel[QSConstants.CNL_TYPE_TAG]
             channel_name = name + "-" + channel[QSConstants.CNL_NAME_TAG]
-            #print(f"channel_type: {channel_type}, channel_name: {channel_name}")
+            # print(f"channel_type: {channel_type}, channel_name: {channel_name}")
             # TODO fogiはスキップ
             if "fogi" in channel_name:
                 continue
-            
+
             args = (
                 channel_name,
                 channel_type,
@@ -239,9 +215,7 @@ class QuBE_Server(DeviceServer):
             to_be_added = (
                 gen_awg(*args)
                 if channel_type == QSConstants.CNL_CTRL_VAL
-                else (
-                    gen_mux(*args) if channel_type == QSConstants.CNL_READ_VAL else None
-                )
+                else (gen_mux(*args) if channel_type == QSConstants.CNL_READ_VAL else None)
             )
             if to_be_added is not None:
                 devices.append(to_be_added)
@@ -274,7 +248,6 @@ class QuBE_Server(DeviceServer):
 
     @inlineCallbacks
     def findDevices(self):  # @inlineCallbacks
-        cxn = self.client
         found = []
 
         for name in self.possibleLinks.keys():
@@ -312,8 +285,7 @@ class QuBE_Server(DeviceServer):
         Returns:
             success : True if successfuly obtained skew value from the registry
         """
-        cxn = self.client
-        reg = cxn[QSConstants.REGSRV]
+        reg = self.get_registry_service()
         try:
             skew = yield reg.get(QSConstants.REGSKEW)
             self.chassisSkew = json.loads(skew)
@@ -380,11 +352,7 @@ class QuBE_Server(DeviceServer):
             dev.repetition_time = int(round(reptime["ns"]))
             return reptime
         else:
-            raise ValueError(
-                QSMessage.ERR_REP_SETTING.format(
-                    "Sequencer", QSConstants.DAQ_REPT_RESOL
-                )
-            )
+            raise ValueError(QSMessage.ERR_REP_SETTING.format("Sequencer", QSConstants.DAQ_REPT_RESOL))
 
     @setting(103, "DAQ Length", length=["v[s]"], returns=["v[s]"])
     def sequence_length(self, c, length=None):
@@ -409,12 +377,8 @@ class QuBE_Server(DeviceServer):
             return length
         else:
             raise ValueError(
-                QSMessage.ERR_REP_SETTING.format(
-                    "Sequencer", QSConstants.DAQ_SEQL_RESOL
-                )
-                + QSMessage.ERR_INVALID_RANG.format(
-                    "daq_length", "128 ns", "{} ns".format(QSConstants.DAQ_MAXLEN)
-                )
+                QSMessage.ERR_REP_SETTING.format("Sequencer", QSConstants.DAQ_SEQL_RESOL)
+                + QSMessage.ERR_INVALID_RANG.format("daq_length", "128 ns", "{} ns".format(QSConstants.DAQ_MAXLEN))
             )
 
     @setting(105, "DAQ Start", returns=["b"])
@@ -433,9 +397,7 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
 
-        if (
-            QSConstants.CNL_READ_VAL == dev.device_role
-        ):  # Set trigger board to capture units
+        if QSConstants.CNL_READ_VAL == dev.device_role:  # Set trigger board to capture units
             self._readout_mux_start(c)
 
         for chassis_name in c[QSConstants.ACQ_CNXT_TAG].keys():
@@ -482,9 +444,7 @@ class QuBE_Server(DeviceServer):
 
         chassis_list = c[QSConstants.DAC_CNXT_TAG].keys()
         tentative_master = list(chassis_list)[0]
-        clock = (
-            self._sync_ctrl[tentative_master].read_clock()[1] + delay
-        ) & 0xFFFFFFFFFFFFFFF0
+        clock = (self._sync_ctrl[tentative_master].read_clock()[1] + delay) & 0xFFFFFFFFFFFFFFF0
         # In a case where we use master FPGA
         # board as a trigger source
         # clock = self._master_ctrl.read_clock() + delay
@@ -495,7 +455,7 @@ class QuBE_Server(DeviceServer):
             for _awg in enabled_awgs:
                 if 0 <= _awg and _awg < 16:
                     awg_bitmap += 1 << _awg
-            resp = self._sync_ctrl[chassis_name].add_sequencer(clock + skew, awg_bitmap)
+            self._sync_ctrl[chassis_name].add_sequencer(clock + skew, awg_bitmap)
             print(chassis_name, "kick at ", clock + skew, enabled_awgs)
 
         return True
@@ -510,14 +470,11 @@ class QuBE_Server(DeviceServer):
             return False  # Nothing to stop
 
         for chassis_name in c[QSConstants.DAC_CNXT_TAG].keys():
-
             dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-            concurrent_deferred_obj = self._thread_pool.submit(
-                dev.stop_daq, list(enabled_awgs), c[QSConstants.DAQ_TOUT_TAG]
-            )
+            concurrent_deferred_obj = self._thread_pool.submit(dev.stop_daq, list(enabled_awgs), c[QSConstants.DAQ_TOUT_TAG])
             twisted_deferred_obj = future_to_deferred(concurrent_deferred_obj)
 
-            result = yield twisted_deferred_obj
+            yield twisted_deferred_obj
 
         returnValue(True)
 
@@ -600,11 +557,7 @@ class QuBE_Server(DeviceServer):
         dev = self.selectedDevice(c)
         channels = np.atleast_1d(channels).astype(int)
         if not dev.check_awg_channels(channels):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format(
-                    "awg index", 0, dev.number_of_awgs - 1
-                )
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
         return self._register_awg_channels(c, dev, channels)
 
     def _register_awg_channels(self, c, dev, channels):
@@ -646,18 +599,12 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
 
         muxchs = np.atleast_1d(muxchs).astype(int)
         for _mux in muxchs:
             if not dev.static_check_mux_channel_range(_mux):
-                raise ValueError(
-                    QSMessage.ERR_INVALID_RANG.format(
-                        "muxch", 0, QSConstants.ACQ_MULP - 1
-                    )
-                )
+                raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         resp = dev.upload_readout_parameters(muxchs)
         if resp:
             resp = self._register_mux_channels(c, dev, muxchs)
@@ -679,24 +626,18 @@ class QuBE_Server(DeviceServer):
         if chassis_name not in c[QSConstants.ACQ_CNXT_TAG].keys():
             c[QSConstants.ACQ_CNXT_TAG].update({chassis_name: list()})
 
-        registered_ids = [
-            _id for _d, _id, _u in c[QSConstants.ACQ_CNXT_TAG][chassis_name]
-        ]
+        registered_ids = [_id for _d, _id, _u in c[QSConstants.ACQ_CNXT_TAG][chassis_name]]
+        addition = False
         try:
-            addition = False
             idx = registered_ids.index(module_id)
-        except ValueError as e:
+        except ValueError:
             c[QSConstants.ACQ_CNXT_TAG][chassis_name].append((dev, module_id, unit_ids))
         else:
             addition = True
 
         if addition:
-            _dev, _module_id, registered_units = c[QSConstants.ACQ_CNXT_TAG][
-                chassis_name
-            ][idx]
-            registered_units.extend(
-                [unit_id for unit_id in unit_ids if unit_id not in registered_units]
-            )
+            _dev, _module_id, registered_units = c[QSConstants.ACQ_CNXT_TAG][chassis_name][idx]
+            registered_units.extend([unit_id for unit_id in unit_ids if unit_id not in registered_units])
             c[QSConstants.ACQ_CNXT_TAG][chassis_name][idx] = (
                 dev,
                 module_id,
@@ -734,12 +675,8 @@ class QuBE_Server(DeviceServer):
         waveforms = np.atleast_2d(wavedata).astype(complex)
 
         if not dev.check_awg_channels(channels):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format(
-                    "awg index", 0, dev.number_of_awgs - 1
-                )
-            )
-        
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
+
         resp, number_of_chans, data_length = dev.check_waveform(waveforms, channels)
         if not resp:
             raise ValueError(QSMessage.ERR_INVALID_WAVD.format(number_of_chans))
@@ -761,18 +698,12 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
 
         muxchs = np.atleast_1d(muxchs).astype(int)
         for _mux in muxchs:
             if not dev.static_check_mux_channel_range(_mux):
-                raise ValueError(
-                    QSMessage.ERR_INVALID_RANG.format(
-                        "muxch", 0, QSConstants.ACQ_MULP - 1
-                    )
-                )
+                raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
 
         data = dev.download_waveform(muxchs)
 
@@ -807,24 +738,16 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         elif acqnumb is None:
             return dev.acquisition_number_of_windows[muxch]
         elif 0 < acqnumb and acqnumb <= QSConstants.ACQ_MAXNUMCAPT:
             dev.acquisition_number_of_windows[muxch] = acqnumb
             return acqnumb
         else:
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format(
-                    "Acquisition number of windows", 1, QSConstants.ACQ_MAXNUMCAPT
-                )
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("Acquisition number of windows", 1, QSConstants.ACQ_MAXNUMCAPT))
 
     @setting(
         302,
@@ -855,18 +778,11 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         elif window is None:
-            return [
-                (T.Value(_s, "ns"), T.Value(_e, "ns"))
-                for _s, _e in dev.acquisition_window[muxch]
-            ]
+            return [(T.Value(_s, "ns"), T.Value(_e, "ns")) for _s, _e in dev.acquisition_window[muxch]]
 
         wl = [(int(_w[0]["ns"] + 0.5), int(_w[1]["ns"] + 0.5)) for _w in window]
         if dev.static_check_acquisition_windows(wl):
@@ -923,24 +839,16 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         elif mode is None:
             return dev.acquisition_mode[muxch]
         elif mode in QSConstants.ACQ_MODENUMBER:
             dev.set_acquisition_mode(muxch, mode)
             return mode
         else:
-            raise ValueError(
-                QSMessage.ERR_INVALID_ITEM.format(
-                    "Acquisition mode", ",".join(QSConstants.ACQ_MODENUMBER)
-                )
-            )
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("Acquisition mode", ",".join(QSConstants.ACQ_MODENUMBER)))
 
     @setting(304, "Acquisition Mux Enable", muxch=["w"], returns=["b", "*b"])
     def acquisition_mux_enable(self, c, muxch=None):
@@ -958,41 +866,30 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif muxch is not None and not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         else:
             chassis_name = dev.chassis_name
             resp = chassis_name in c[QSConstants.ACQ_CNXT_TAG].keys()
+            idx = None
+            module_enabled = None
             if resp:
                 module_enabled = c[QSConstants.ACQ_CNXT_TAG][chassis_name]
                 resp = True
                 try:
-                    idx = [_m for _d, _m, _u in module_enabled].index(
-                        dev.get_capture_module_id()
-                    )
-                except ValueError as e:
+                    idx = [_m for _d, _m, _u in module_enabled].index(dev.get_capture_module_id())
+                except ValueError:
                     resp = False
-            if resp:
+            if resp and resp is not None and module_enabled is not None:
                 _d, _m, unit_enabled = module_enabled[idx]
                 if muxch is not None:
                     resp = dev.get_capture_unit_id(muxch) in unit_enabled
                     result = True if resp else False
                 else:
-                    result = [
-                        (dev.get_capture_unit_id(i) in unit_enabled)
-                        for i in range(QSConstants.ACQ_MULP)
-                    ]
+                    result = [(dev.get_capture_unit_id(i) in unit_enabled) for i in range(QSConstants.ACQ_MULP)]
             else:
-                result = (
-                    [False for _i in range(QSConstants.ACQ_MULP)]
-                    if muxch is None
-                    else False
-                )
+                result = [False for _i in range(QSConstants.ACQ_MULP)] if muxch is None else False
             return result
 
     @setting(305, "Filter Pre Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
@@ -1001,25 +898,17 @@ class QuBE_Server(DeviceServer):
         Set complex FIR coefficients to a mux channel. (getting obsoleted)
         """
         self.acquisition_fir_coefficients(c, muxch, coeffs)
-        raise Exception(
-            "Tabuchi wants to rename the API to acquisition_fir_coefficients"
-        )
+        raise Exception("Tabuchi wants to rename the API to acquisition_fir_coefficients")
 
-    @setting(
-        306, "Average Window Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"]
-    )
+    @setting(306, "Average Window Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
     def set_window_coefficients(self, c, muxch, coeffs):
         """
         Set complex window coefficients to a mux channel. (getting obsoleted)
         """
         self.acquisition_window_coefficients(c, muxch, coeffs)
-        raise Exception(
-            "Tabuchi wants to rename the API to acquisition_window_coefficients"
-        )
+        raise Exception("Tabuchi wants to rename the API to acquisition_window_coefficients")
 
-    @setting(
-        307, "Acquisition FIR Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"]
-    )
+    @setting(307, "Acquisition FIR Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
     def acquisition_fir_coefficients(self, c, muxch, coeffs):
         """
         Set complex FIR (finite impulse response) filter coefficients to a mux channel.
@@ -1039,19 +928,13 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         elif not dev.static_check_acquisition_fir_coefs(coeffs):
             raise ValueError(
                 QSMessage.ERR_INVALID_RANG.format("abs(coeffs)", 0, 1)
-                + QSMessage.ERR_INVALID_RANG.format(
-                    "len(coeffs)", 1, QSConstants.ACQ_MAX_FCOEF
-                )
+                + QSMessage.ERR_INVALID_RANG.format("len(coeffs)", 1, QSConstants.ACQ_MAX_FCOEF)
             )
         else:
             dev.set_acquisition_fir_coefficient(muxch, coeffs)
@@ -1084,19 +967,13 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
         elif not dev.static_check_acquisition_window_coefs(coeffs):
             raise ValueError(
                 QSMessage.ERR_INVALID_RANG.format("abs(coeffs)", 0, 1)
-                + QSMessage.ERR_INVALID_RANG.format(
-                    "len(coeffs)", 1, QSConstants.ACQ_MAX_WCOEF
-                )
+                + QSMessage.ERR_INVALID_RANG.format("len(coeffs)", 1, QSConstants.ACQ_MAX_WCOEF)
             )
         else:
             dev.set_acquisition_window_coefficient(muxch, coeffs)
@@ -1121,16 +998,14 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         # TODO: 後で消す
-        #print(f"dev.device_name: {dev.device_name}")
+        # print(f"dev.device_name: {dev.device_name}")
         if frequency is None:
             resp = dev.get_lo_frequency()
             frequency = T.Value(resp, "MHz")
         elif dev.static_check_lo_frequency(frequency["MHz"]):
             dev.set_lo_frequency(frequency["MHz"])
         else:
-            raise ValueError(
-                QSMessage.ERR_FREQ_SETTING.format("LO", QSConstants.DAC_LO_RESOL)
-            )
+            raise ValueError(QSMessage.ERR_FREQ_SETTING.format("LO", QSConstants.DAC_LO_RESOL))
         return frequency
 
     @setting(401, "Frequency TX NCO", frequency=["v[Hz]"], returns=["v[Hz]"])
@@ -1174,7 +1049,6 @@ class QuBE_Server(DeviceServer):
             dev.set_dac_coarse_frequency(frequency["MHz"])
         return frequency
 
-
     @setting(
         402,
         "Frequency TX Fine NCO",
@@ -1204,11 +1078,7 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         if not dev.check_awg_channels([channel]):
-            raise ValueError(
-                QSMessage.ERR_INVALID_RANG.format(
-                    "awg index", 0, dev.number_of_awgs - 1
-                )
-            )
+            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
         elif frequency is None:
             resp = dev.get_dac_fine_frequency(channel)
             frequency = T.Value(resp, "MHz")
@@ -1216,9 +1086,7 @@ class QuBE_Server(DeviceServer):
             dev.set_dac_fine_frequency(channel, frequency["MHz"])
         else:
             raise ValueError(
-                QSMessage.ERR_FREQ_SETTING.format(
-                    "TX Fine NCO", QSConstants.DAC_FNCO_RESOL
-                )
+                QSMessage.ERR_FREQ_SETTING.format("TX Fine NCO", QSConstants.DAC_FNCO_RESOL)
                 + "\n"
                 + QSMessage.ERR_INVALID_RANG.format(
                     "TX Fine NCO frequency",
@@ -1251,9 +1119,7 @@ class QuBE_Server(DeviceServer):
         # TODO: static_check_adc_coarse_frequency
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(
-                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
-            )
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
         elif frequency is None:
             resp = dev.get_adc_coarse_frequency()
             frequency = T.Value(resp, "MHz")
@@ -1283,9 +1149,7 @@ class QuBE_Server(DeviceServer):
             raise Exception(
                 QSMessage.ERR_INVALID_ITEM.format(
                     "The sideband string",
-                    "{} or {}".format(
-                        QSConstants.CNL_MXUSB_VAL, QSConstants.CNL_MXLSB_VAL
-                    ),
+                    "{} or {}".format(QSConstants.CNL_MXUSB_VAL, QSConstants.CNL_MXLSB_VAL),
                 )
             )
         else:

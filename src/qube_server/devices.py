@@ -1,21 +1,19 @@
-import sys
 import copy
+import sys
+import traceback
 
 import numpy as np
-
-from labrad.devices import DeviceWrapper
-
-from twisted.internet.defer import inlineCallbacks, returnValue
-
 from e7awgsw import (
+    CaptureParam,
     DspUnit,
     WaveSequence,
-    CaptureParam,
 )
-
+from labrad.devices import DeviceWrapper
 from quel_ic_config import Quel1Box
+from twisted.internet.defer import inlineCallbacks
 
 from .constants import QSConstants, QSMessage
+
 
 ############################################################
 #
@@ -49,7 +47,6 @@ class QuBE_DeviceBase(DeviceWrapper):
 
     @inlineCallbacks
     def get_connected(self, *args, **kwargs):  # @inlineCallbacks
-
         yield
 
     @property
@@ -65,23 +62,15 @@ class QuBE_DeviceBase(DeviceWrapper):
         return self._chassis
 
     def static_check_value(self, value, resolution, multiplier=50, include_zero=False):
-        resp = resolution > multiplier * abs(
-            ((2 * value + resolution) % (2 * resolution)) - resolution
-        )
+        resp = resolution > multiplier * abs(((2 * value + resolution) % (2 * resolution)) - resolution)
         if resp:
-            resp = (
-                ((2 * value + resolution) // (2 * resolution)) > 0
-                if not include_zero
-                else True
-            )
+            resp = ((2 * value + resolution) // (2 * resolution)) > 0 if not include_zero else True
         return resp
 
 
 class QuBE_Control_FPGA(QuBE_DeviceBase):
-
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
-
         yield super(QuBE_Control_FPGA, self).get_connected(*args, **kw)
 
         self.__initialized = False
@@ -116,13 +105,7 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
 
     @repetition_time.setter
     def repetition_time(self, value_in_ns):  # @repetition_time.setter
-        self._reptime = int(
-            (
-                (value_in_ns + QSConstants.DAQ_REPT_RESOL / 2)
-                // QSConstants.DAQ_REPT_RESOL
-            )
-            * QSConstants.DAQ_REPT_RESOL
-        )
+        self._reptime = int(((value_in_ns + QSConstants.DAQ_REPT_RESOL / 2) // QSConstants.DAQ_REPT_RESOL) * QSConstants.DAQ_REPT_RESOL)
 
     @property
     def sequence_length(self):  # @property
@@ -169,21 +152,12 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
             return (False, help, None)
 
     def upload_waveform(self, waveforms, channels):
-
-        wait_words = int(
-            (
-                (self.repetition_time - self.sequence_length)
-                + QSConstants.DAC_WORD_IVL / 2
-            )
-            // QSConstants.DAC_WORD_IVL
-        )
+        wait_words = int(((self.repetition_time - self.sequence_length) + QSConstants.DAC_WORD_IVL / 2) // QSConstants.DAC_WORD_IVL)
 
         for _waveform, _channel in zip(waveforms, channels):
             wave_seq = WaveSequence(num_wait_words=0, num_repeats=self.number_of_shots)
             iq_samples = list(zip(*self.static_DACify(_waveform)))
-            wave_seq.add_chunk(
-                iq_samples=iq_samples, num_blank_words=wait_words, num_repeats=1
-            )
+            wave_seq.add_chunk(iq_samples=iq_samples, num_blank_words=wait_words, num_repeats=1)
             self._awg_ctrl.set_wave_sequence(self._awg_ch_ids[_channel], wave_seq)
         return True
 
@@ -217,25 +191,17 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
         return resp
 
 
-import traceback
-
 class QuBE_Control_LSI(QuBE_DeviceBase):
-
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
-
         yield super(QuBE_Control_LSI, self).get_connected(*args, **kw)
 
         try:
             ipfpga = kw["ipfpga"]
-            iplsi = kw["iplsi"]
-            ipsync = kw["ipsync"]
-            device_type=kw["device_type"]
+            device_type = kw["device_type"]
 
             box = Quel1Box.create(
                 ipaddr_wss=ipfpga,
-                #ipaddr_sss=ipsync,
-                #ipaddr_css=iplsi,
                 boxtype=device_type,
             )
             # TODO: reconnect
@@ -254,7 +220,7 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
         except Exception as e:
             print("Exception!!!!!!!!")
             print(sys._getframe().f_code.co_name, e)
-            traceback.print_exc() # DEBUG
+            traceback.print_exc()  # DEBUG
 
         yield
 
@@ -277,7 +243,7 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
         else:
             qwsb = "L"
         self._css.set_sideband(self._group, self._line, qwsb)
-        #self._mix_usb_lsb = sideband
+        # self._mix_usb_lsb = sideband
 
     def get_dac_coarse_frequency(self):
         return self._css.get_dac_cnco(self._group, self._line) / 1e6
@@ -305,8 +271,8 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
         resp = self.static_check_value(freq_in_mhz, resolution, include_zero=True)
         return resp
 
-class QuBE_ControlLine(QuBE_Control_FPGA, QuBE_Control_LSI):
 
+class QuBE_ControlLine(QuBE_Control_FPGA, QuBE_Control_LSI):
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
         super(QuBE_ControlLine, self).get_connected(*args, **kw)
@@ -314,17 +280,14 @@ class QuBE_ControlLine(QuBE_Control_FPGA, QuBE_Control_LSI):
 
 
 class QuBE_ReadoutLine(QuBE_ControlLine):
-
     @inlineCallbacks
     def get_connected(self, *args, **kw):  # @inlineCallbacks
-
         yield super(QuBE_ReadoutLine, self).get_connected(*args, **kw)
 
         self.__initialized = False
         try:
-
             # TODO: 後で消す
-            #print("start QuBE_ReadoutLine")
+            # print("start QuBE_ReadoutLine")
 
             self._cap_ctrl = kw["cap_ctrl"]
             self._cap_mod_id = kw["cap_mod_id"]
@@ -333,25 +296,17 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
             # TODO: 後で消す
             ##print("QuBE_ReadoutLine kw:", kw)
             self._rx_coarse_frequency = self.get_adc_coarse_frequency()
-            #print(self._name,'rxnco',self._rx_coarse_frequency)
+            # print(self._name,'rxnco',self._rx_coarse_frequency)
             self.__initialized = True
         except Exception as e:
             print("Exception: QuBE_ReadoutLine!!!!!!!!")
             print(sys._getframe().f_code.co_name, e)
 
         if self.__initialized:
-            self._window = [
-                QSConstants.ACQ_INITWINDOW for i in range(QSConstants.ACQ_MULP)
-            ]
-            self._window_coefs = [
-                QSConstants.ACQ_INITWINDCOEF for i in range(QSConstants.ACQ_MULP)
-            ]
-            self._fir_coefs = [
-                QSConstants.ACQ_INITFIRCOEF for i in range(QSConstants.ACQ_MULP)
-            ]
-            self._acq_mode = [
-                QSConstants.ACQ_INITMODE for i in range(QSConstants.ACQ_MULP)
-            ]
+            self._window = [QSConstants.ACQ_INITWINDOW for i in range(QSConstants.ACQ_MULP)]
+            self._window_coefs = [QSConstants.ACQ_INITWINDCOEF for i in range(QSConstants.ACQ_MULP)]
+            self._fir_coefs = [QSConstants.ACQ_INITFIRCOEF for i in range(QSConstants.ACQ_MULP)]
+            self._acq_mode = [QSConstants.ACQ_INITMODE for i in range(QSConstants.ACQ_MULP)]
 
     def get_capture_module_id(self):
         return self._cap_mod_id
@@ -375,17 +330,17 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
 
     def set_acquisition_fir_coefficient(self, muxch, coeffs):
         def fircoef_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int)
+            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int) + 1j * (
+                np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF
+            ).astype(int)
 
         self._fir_coefs[muxch] = fircoef_DACify(coeffs)
 
     def set_acquisition_window_coefficient(self, muxch, coeffs):
         def window_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int)
+            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int) + 1j * (
+                np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF
+            ).astype(int)
 
         self._window_coefs[muxch] = window_DACify(coeffs)
 
@@ -414,29 +369,14 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
         - The capture word is defined as the four multiple of sampling points. It
           corresponds to 4 * ADC_BBSAMP_IVL = ACQ_CAPW_RESOL (nanoseconds).
         """
-        repetition_word = int(
-            (self.repetition_time + QSConstants.ACQ_CAPW_RESOL // 2)
-            // QSConstants.ACQ_CAPW_RESOL
-        )
+        repetition_word = int((self.repetition_time + QSConstants.ACQ_CAPW_RESOL // 2) // QSConstants.ACQ_CAPW_RESOL)
         for mux in muxchs:
             param = CaptureParam()
             win_word = list()
-            for _s, _e in self.acquisition_window[
-                mux
-            ]:  # flatten window (start,end) to a series
+            for _s, _e in self.acquisition_window[mux]:  # flatten window (start,end) to a series
                 # of timestamps
-                win_word.append(
-                    int(
-                        (_s + QSConstants.ACQ_CAPW_RESOL / 2)
-                        // QSConstants.ACQ_CAPW_RESOL
-                    )
-                )
-                win_word.append(
-                    int(
-                        (_e + QSConstants.ACQ_CAPW_RESOL / 2)
-                        // QSConstants.ACQ_CAPW_RESOL
-                    )
-                )
+                win_word.append(int((_s + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL))
+                win_word.append(int((_e + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL))
             win_word.append(repetition_word)
 
             param.num_integ_sections = int(self.number_of_shots)
@@ -612,11 +552,7 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
             return False if 0 != w % QSConstants.ACQ_CAPW_RESOL else True
 
         def check_duration(start, end):
-            return (
-                False
-                if start > end or end - start > QSConstants.ACQ_MAXWINDOW
-                else True
-            )
+            return False if start > end or end - start > QSConstants.ACQ_MAXWINDOW else True
 
         if 0 != list_of_windows[0][0] % QSConstants.ACQ_CAST_RESOL:
             return False
@@ -642,4 +578,3 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
         if resp:
             resp = 1.0 > np.max(np.abs(coeffs))
         return resp
-
