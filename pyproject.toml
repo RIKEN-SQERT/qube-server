@@ -5,14 +5,15 @@ description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
+    "deprecated>=1.2.18",
     "e7awgsw",
+    "pylabrad>=0.98.2",
     "quel-clock-master",
     "quel-ic-config",
 ]
 
 [project.scripts]
 qube_server = "qube_server.app:main"
-
 
 [build-system]
 requires = ["hatchling"]
@@ -22,3 +23,7 @@ build-backend = "hatchling.build"
 quel-clock-master = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_clock_master", rev = "maintenance/0.8.x" }
 e7awgsw = { path = ".prebuilt/dependency_pkgs/simplemulti_standard/e7awgsw-1.0.0-py3-none-any.whl" }
 quel-ic-config = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_ic_config", rev = "maintenance/0.8.x" }
+
+[tool.ruff]
+line-length = 140
+target-version = "py39"

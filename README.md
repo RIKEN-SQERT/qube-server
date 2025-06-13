@@ -39,3 +39,12 @@ Finally, you can start the server with the following command:
 ```bash
 uv run qube_server
 ```
+
+## For Developers
+
+To run linter and formatter, execute `make` command as following:
+
+```
+make lint
+make format
+```
