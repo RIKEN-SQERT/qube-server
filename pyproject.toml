@@ -19,6 +19,14 @@ qube_server = "qube_server.app:main"
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
+[dependency-groups]
+dev = [
+    "pytest>=8.4.0",
+    "pytest-mock>=3.14.1",
+    "pytest-twisted>=1.14.3",
+    "ruff>=0.11.13",
+]
+
 [tool.uv.sources]
 quel-clock-master = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_clock_master", rev = "maintenance/0.8.x" }
 e7awgsw = { path = ".prebuilt/dependency_pkgs/simplemulti_standard/e7awgsw-1.0.0-py3-none-any.whl" }
@@ -27,3 +35,4 @@ quel-ic-config = { git = "https://github.com/quel-inc/quelware.git", subdirector
 [tool.ruff]
 line-length = 140
 target-version = "py39"
+

@@ -41,7 +41,7 @@ class QuBE_Server(DeviceServer):
     possibleLinks = {}
     chassisSkew = {}
 
-    def get_registry_service(self):
+    def _get_registry_service(self):
         cxn: Any = self.client
         return cxn[QSConstants.REGSRV]
 
@@ -49,7 +49,7 @@ class QuBE_Server(DeviceServer):
     def initServer(self):  # @inlineCallbacks
         yield DeviceServer.initServer(self)
 
-        reg = self.get_registry_service()
+        reg = self._get_registry_service()
         try:
             yield reg.cd(QSConstants.REGDIR)
             config = yield reg.get(QSConstants.REGLNK)
@@ -285,7 +285,7 @@ class QuBE_Server(DeviceServer):
         Returns:
             success : True if successfuly obtained skew value from the registry
         """
-        reg = self.get_registry_service()
+        reg = self._get_registry_service()
         try:
             skew = yield reg.get(QSConstants.REGSKEW)
             self.chassisSkew = json.loads(skew)

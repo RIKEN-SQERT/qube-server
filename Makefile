@@ -1,6 +1,9 @@
 lint:
-	uvx ruff check .
+	ruff check .
 
 format:
-	uvx ruff check --select I --fix
-	uvx ruff format
+	ruff check --select I --fix
+	ruff format
+
+unittest:
+	pytest

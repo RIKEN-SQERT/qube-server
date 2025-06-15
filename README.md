@@ -48,3 +48,9 @@ To run linter and formatter, execute `make` command as following:
 make lint
 make format
 ```
+
+To run unittest,
+
+```
+make unittest
+```
