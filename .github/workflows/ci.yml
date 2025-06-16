@@ -1,0 +1,47 @@
+name: Checks and tests
+
+on:
+  pull_request:
+
+jobs:
+  checks-and-tests:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.9'
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v5
+
+      - name: Install build dependencies
+        run: |
+          : # sudo apt-get update
+          sudo apt-get install libcairo2-dev pkg-config python3-dev libgirepository-2.0-dev
+
+      - name: Download prebuilt
+        run: ./download_and_extract_prebuilt.sh
+
+      - name: Install the project
+        run: uv sync --locked --dev
+
+      - name: Run linter
+        run: make lint
+        env:
+          RUFF_OUTPUT_FORMAT: github
+        if: ${{ !cancelled() }}
+
+      - name: Check formatting
+        run: make format-check
+        env:
+          RUFF_OUTPUT_FORMAT: github
+        if: ${{ !cancelled() }}
+
+      - name: Run unittests
+        run: make unittest
+        if: ${{ !cancelled() }}
