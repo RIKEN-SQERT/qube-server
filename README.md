@@ -28,6 +28,12 @@ Use `uv` to create a virtual environment and install all the necessary Python de
 uv sync
 ```
 
+For developers,
+
+```bash
+uv sync --dev
+```
+
 Make sure you have uv installed.
 If you don't have it yet, please follow the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
