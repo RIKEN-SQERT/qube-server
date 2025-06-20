@@ -1,3 +1,5 @@
+# ruff: noqa
+
 import json
 import logging
 import os
@@ -6,7 +8,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-from quel_clock_master import SequencerClient
 from quel_ic_config import Quel1BoxIntrinsic, Quel1BoxType
 
 
@@ -42,13 +43,17 @@ class QubeBoxInfo:
     def __new__(cls, *args, **kargs):
         if not hasattr(cls, "_instance"):
             cls._instance = super(QubeBoxInfo, cls).__new__(cls)
-            with open(cls.config_directory.joinpath(cls.box_info_filename)) as info_file:
+            with open(
+                cls.config_directory.joinpath(cls.box_info_filename)
+            ) as info_file:
                 cls.box_info = json.load(info_file)
         return cls._instance
 
     @classmethod
     def _get_subsystem_ipaddr(cls, device_id, ss_ip_identifier, place_holder="*"):
-        return cls.box_info[device_id]["ip"].replace(place_holder, f"{ss_ip_identifier}")
+        return cls.box_info[device_id]["ip"].replace(
+            place_holder, f"{ss_ip_identifier}"
+        )
 
     @classmethod
     def get_ipaddr_wss(cls, device_id):
@@ -88,7 +93,9 @@ class QubeBoxGroup:
     def __new__(cls, *args, **kargs):
         self = super(QubeBoxGroup, cls).__new__(cls)
         if not hasattr(cls, "box_group_all"):
-            with open(cls.config_directory.joinpath(cls.box_group_filename)) as group_file:
+            with open(
+                cls.config_directory.joinpath(cls.box_group_filename)
+            ) as group_file:
                 cls.box_group_all = json.load(group_file)
         return self
 
@@ -114,13 +121,21 @@ class QubePortMapper:
     def __new__(cls, *args, **kargs):
         self = super(QubePortMapper, cls).__new__(cls)
         if not hasattr(cls, "port_mapping_by_type"):
-            with open(cls.config_directory.joinpath(cls.port_mapping_filename)) as port_file:
+            with open(
+                cls.config_directory.joinpath(cls.port_mapping_filename)
+            ) as port_file:
                 cls.port_mapping_by_type = json.load(port_file)
         return self
 
     def __init__(self, box_type):
-        self.port_mapping = {convert_str_to_group_line_tuple(k): v for (k, v) in self.port_mapping_by_type[box_type].items()}
-        self.reverse_mapping = {info["port"]: (group, line) for (group, line), info in self.port_mapping.items()}
+        self.port_mapping = {
+            convert_str_to_group_line_tuple(k): v
+            for (k, v) in self.port_mapping_by_type[box_type].items()
+        }
+        self.reverse_mapping = {
+            info["port"]: (group, line)
+            for (group, line), info in self.port_mapping.items()
+        }
 
     def get_port(self, group, line):
         return self.port_mapping[(group, line)]["port"]
@@ -170,7 +185,9 @@ class QubeDefaultConfigFactory:
     def __new__(cls, *args, **kargs):
         if not hasattr(cls, "_instance"):
             cls._instance = super(QubeDefaultConfigFactory, cls).__new__(cls)
-            with open(cls.config_directory.joinpath(cls.default_config_filename)) as config_file:
+            with open(
+                cls.config_directory.joinpath(cls.default_config_filename)
+            ) as config_file:
                 cls.default_config_by_roll = json.load(config_file)
         return cls._instance
 
@@ -179,7 +196,9 @@ class QubeDefaultConfigFactory:
         box_type = box_info.get_box_type_str(device_id)
         pmap = QubePortMapper(box_type)
         box_line_config = QubeBoxLineConfig()
-        box_line_config.load_config_by_role(self.default_config_by_roll[device_id], pmap)
+        box_line_config.load_config_by_role(
+            self.default_config_by_roll[device_id], pmap
+        )
         return box_line_config
 
 
@@ -198,7 +217,9 @@ class LogWriter:
             logger.setLevel(self.logging_level)
             self.file_handler = logging.FileHandler(self.log_filepath)
             self.file_handler.setLevel(self.logging_level)
-            handler_format = logging.Formatter("%(asctime)s - %(name)s - %(levelname)s - %(message)s")
+            handler_format = logging.Formatter(
+                "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+            )
             self.file_handler.setFormatter(handler_format)
             logger.addHandler(self.file_handler)
 
@@ -277,9 +298,16 @@ class QubeBoxSetupHelper:
     def read_clock(self):
         return self.sequencer_client.read_clock()[1]
 
-    def linkup(self, background_noise_threshold=5000, save_data=True, ignore_access_failure_of_adrf6780=False):
+    def linkup(
+        self,
+        background_noise_threshold=5000,
+        save_data=True,
+        ignore_access_failure_of_adrf6780=False,
+    ):
         # init peripherals
-        self.box.css.configure_peripherals(ignore_access_failure_of_adrf6780=ignore_access_failure_of_adrf6780)
+        self.box.css.configure_peripherals(
+            ignore_access_failure_of_adrf6780=ignore_access_failure_of_adrf6780
+        )
         self.box.css.configure_all_mxfe_clocks()
 
         # prepare linkup log dir
@@ -304,11 +332,15 @@ class QubeBoxSetupHelper:
                 save_dirpath=save_dirpath,
             )
 
-        print(f"{self.device_id} linkup result: MxFE0: {linkup_ok[0]}, MxFE1: {linkup_ok[1]}")
+        print(
+            f"{self.device_id} linkup result: MxFE0: {linkup_ok[0]}, MxFE1: {linkup_ok[1]}"
+        )
 
         for mxfe in mxfe_list:
             status, err_flag = list(map(hex, self.box.css.get_link_status(mxfe)))
-            print(f"{self.device_id} MxFE{mxfe} link status: {status}, crc error: {err_flag}")
+            print(
+                f"{self.device_id} MxFE{mxfe} link status: {status}, crc error: {err_flag}"
+            )
         return linkup_ok
 
     def configure_lines(self, box_line_config):
@@ -319,7 +351,12 @@ class QubeBoxSetupHelper:
                 self.box.css.set_vatt(group, line, line_config.vatt)
 
     def initialize(
-        self, box_line_config=None, save_linkup_data=True, save_log=True, logging_level=logging.INFO, ignore_access_failure_of_adrf6780={}
+        self,
+        box_line_config=None,
+        save_linkup_data=True,
+        save_log=True,
+        logging_level=logging.INFO,
+        ignore_access_failure_of_adrf6780={},
     ):
         if box_line_config is None:
             default_config_factory = QubeDefaultConfigFactory()
@@ -330,7 +367,10 @@ class QubeBoxSetupHelper:
         else:
             log_filepath = None
         with LogWriter(log_filepath, logging_level=logging_level):
-            linkup_ok = self.linkup(save_data=save_linkup_data, ignore_access_failure_of_adrf6780=ignore_access_failure_of_adrf6780)
+            linkup_ok = self.linkup(
+                save_data=save_linkup_data,
+                ignore_access_failure_of_adrf6780=ignore_access_failure_of_adrf6780,
+            )
             if all(linkup_ok):
                 self.configure_lines(box_line_config)
                 self.open_all_lines()
@@ -359,4 +399,6 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     setup_helper = QubeBoxSetupHelper(args.target)
-    setup_helper.initialize(ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780)
+    setup_helper.initialize(
+        ignore_access_failure_of_adrf6780=args.ignore_access_failure_of_adrf6780
+    )

@@ -4,7 +4,7 @@ A labRAD server for QuBE environments
 
 ## Getting Started
 
-### 1. Clone this repository:
+### Clone this repository:
 
 Clone this repository to your local machine:
 
@@ -12,15 +12,7 @@ Clone this repository to your local machine:
 git clone https://github.com/qipe-nlab/qube-server
 ```
 
-### 2. Download prebuilt dependencies
-
-run the provided script to download and extract prebuilt packages required by the server:
-
-```bash
-./download_and_extract_prebuilt.sh
-```
-
-### 3. Prepare virtual environment
+### Prepare virtual environment
 
 Use `uv` to create a virtual environment and install all the necessary Python dependencies from the lockfile:
 
@@ -38,7 +30,7 @@ Make sure you have uv installed.
 If you don't have it yet, please follow the [official installation guide](https://docs.astral.sh/uv/getting-started/installation/).
 
 
-### 4. execute the server
+### execute the server
 
 Finally, you can start the server with the following command:
 

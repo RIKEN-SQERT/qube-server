@@ -97,11 +97,15 @@ class QSConstants:
     DAQ_INITSDLY = 1  # seconds; synchronization delay
     ACQ_INITMODE = "3"
     ACQ_INITWINDOW = [(0, 2048)]  # initial demodulation windows
-    ACQ_INITFIRCOEF = np.array([1] * 8).astype(complex)  # initial complex FIR filter coeffs
+    ACQ_INITFIRCOEF = np.array([1] * 8).astype(
+        complex
+    )  # initial complex FIR filter coeffs
     ACQ_INITWINDCOEF = np.array([]).astype(complex)  # initial complex window coeffs
     SYNC_CLOCK = 125 * 1000 * 1000  # synchronization clock
     DAC_CNXT_TAG = "awgs"  # used in the device context
     ACQ_CNXT_TAG = "muxs"  # used in the device context
+    CAP_TASK_TAG = "cap_task"  # used in the device context
+    AWG_TASK_TAG = "awg_task"  # used in the device context
     SYN_CNXT_TAG = "synch"  # used in the device context
     DAQ_TOUT_TAG = "timeout"  # used in the device context
     DAQ_SDLY_TAG = "sync_delay"  # used in the device context; synchronization delay
@@ -115,7 +119,7 @@ class QSConstants:
     CNL_TYPE_TAG = "type"  # used in the json config. channel(CNL) type.
     # either value is to be specified:
     CNL_CTRL_VAL = "control"  # + the channel is for control
-    CNL_READ_VAL = "mux"  # + the channel is for readout
+    CNL_READ_VAL = "readout"  # + the channel is for readout
     CNL_MIXCH_TAG = "mixer_ch"  # used in the json config. mixer channel(CNL).
     CNL_MIXSB_TAG = "mixer_sb"  # used in the json config. mixer channel(CNL)
     # side-band selection. Either value can be set
@@ -150,7 +154,9 @@ class QSMessage:
         + "(2) The number of channels are less than that of # of awgs. "
         + "(3) The sequence length in nano-second must be identical to "
         + "the value set by daq_length(). "
-        + "(4) The data length must be multiple of {}. ".format(QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL)
+        + "(4) The data length must be multiple of {}. ".format(
+            QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
+        )
         + "(5) The absolute value of complex data is less than 1. "
         + "The problem is {}. "
     )

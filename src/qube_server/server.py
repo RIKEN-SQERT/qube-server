@@ -1,31 +1,46 @@
+from __future__ import annotations
+
 import concurrent.futures
 import json
-import re
 import sys
-from typing import Any
+from typing import Any, Final, Optional, cast
 
 import numpy as np
-from e7awgsw import (
-    AWG,
-    AwgCtrl,
-    CaptureModule,
-)
 from labrad import types as T
-from labrad.concurrent import future_to_deferred
 from labrad.devices import DeviceServer
 from labrad.server import setting
 from labrad.units import Value
-from quel_clock_master import (
-    SequencerClient,
+from quel_ic_config import (
+    AbstractStartAwgunitsTask,
+    BoxStartCapunitsByTriggerTask,
+    Quel1Box,
+    Quel1BoxType,
 )
-from quel_ic_config import Quel1Box
-from quel_ic_config.e7resource_mapper import Quel1E7ResourceMapper
+from twisted.internet import defer, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
+from typing_extensions import TypeAlias
 
+from qube_server.utils import is_reachable
+
+from .box_connection import BoxConnection, acquire_all_locks, release_all_locks
 from .constants import QSConstants, QSMessage
-from .devices import QuBE_ControlLine, QuBE_ReadoutLine
-from .qube_box_setup_helper import QubeBoxInfo, QubePortMapper
-from .utils import QuBECaptureCtrl
+from .devices import (
+    DeviceConnectionInfo,
+    DeviceConnectionInfoArgs,
+    DeviceType,
+    QuBE_ControlPort,
+    QuBE_DeviceBase,
+    QuBE_FogiPort,
+    QuBE_PumpPort,
+    QuBE_ReadoutPort,
+    create_device_connection_infos_from_box_connection,
+)
+from .model import PossibleLinks, Skews
+
+BOXLOCK_TIMEOUT_DURATION: Final[float] = 10  # sec
+
+CapTaskType: TypeAlias = BoxStartCapunitsByTriggerTask
+AwgTaskType: TypeAlias = AbstractStartAwgunitsTask
 
 
 ############################################################
@@ -34,36 +49,64 @@ from .utils import QuBECaptureCtrl
 #
 class QuBE_Server(DeviceServer):
     name = QSConstants.SRVNAME
-    deviceWrappers = {
-        QSConstants.CNL_READ_VAL: QuBE_ReadoutLine,
-        QSConstants.CNL_CTRL_VAL: QuBE_ControlLine,
-    }
-    possibleLinks = {}
-    chassisSkew = {}
+    deviceWrapper = None
 
-    def _get_registry_service(self):
-        cxn: Any = self.client
-        return cxn[QSConstants.REGSRV]
+    def __init__(
+        self,
+        possible_links_json_filepath: Optional[str] = None,
+        chassis_skew_json_filepath: Optional[str] = None,
+    ):
+        super().__init__()
+        self._name_to_box_conn: dict[str, BoxConnection] = {}
+        self._possible_links_json_filepath = possible_links_json_filepath
+        self._chassis_skew_json_filepath = chassis_skew_json_filepath
 
     @inlineCallbacks
-    def initServer(self):  # @inlineCallbacks
-        yield DeviceServer.initServer(self)
-
-        reg = self._get_registry_service()
+    def _get_possible_links(self):
+        cxn: Any = self.client
+        reg = cxn[QSConstants.REGSRV]
         try:
             yield reg.cd(QSConstants.REGDIR)
             config = yield reg.get(QSConstants.REGLNK)
-            self.possibleLinks = json.loads(config)
-            skew = yield reg.get(QSConstants.REGSKEW)
-            self.chassisSkew = json.loads(skew)
-            self._sync_ctrl = dict()
-            self.box_info = QubeBoxInfo()
+            possibleLinks = PossibleLinks.model_validate_json(config)
+            returnValue(possibleLinks)
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
 
+    @inlineCallbacks
+    def _get_skew_config(self):
+        cxn: Any = self.client
+        reg = cxn[QSConstants.REGSRV]
+        chassisSkew: dict[str, int] = {}
+        try:
+            yield reg.cd(QSConstants.REGDIR)
+            skew = yield reg.get(QSConstants.REGSKEW)
+            chassisSkew = json.loads(skew)
+        except Exception as e:
+            print(sys._getframe().f_code.co_name, e)
+        returnValue(chassisSkew)
+
+    @inlineCallbacks
+    def initServer(self):
+        if self._possible_links_json_filepath is None:
+            self.possibleLinks: PossibleLinks = yield self._get_possible_links()
+        else:
+            with open(self._possible_links_json_filepath) as f:
+                self.possibleLinks = PossibleLinks.model_validate_json(f.read())
+
+        if self._chassis_skew_json_filepath is None:
+            self.chassisSkew: Skews = yield self._get_skew_config()
+        else:
+            with open(self._chassis_skew_json_filepath) as f:
+                self.chassisSkew = Skews.model_validate_json(f.read())
+
+        yield DeviceServer.initServer(self)
+
         try:
             max_workers = QSConstants.THREAD_MAX_WORKERS
-            self._thread_pool = concurrent.futures.ThreadPoolExecutor(max_workers=max_workers)  # for a threaded operation
+            self._thread_pool = concurrent.futures.ThreadPoolExecutor(
+                max_workers=max_workers
+            )  # for a threaded operation
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
 
@@ -71,224 +114,71 @@ class QuBE_Server(DeviceServer):
         DeviceServer.initContext(self, c)
         c[QSConstants.DAC_CNXT_TAG] = dict()
         c[QSConstants.ACQ_CNXT_TAG] = dict()
+        c[QSConstants.AWG_TASK_TAG] = dict()
+        c[QSConstants.CAP_TASK_TAG] = dict()
         c[QSConstants.DAQ_TOUT_TAG] = QSConstants.DAQ_INITTOUT
         c[QSConstants.DAQ_SDLY_TAG] = QSConstants.DAQ_INITSDLY
 
-    def chooseDeviceWrapper(self, *args, **kw):
-        tag = QSConstants.CNL_READ_VAL if QSConstants.CNL_READ_VAL in args[2] else QSConstants.CNL_CTRL_VAL
-        return self.deviceWrappers[tag]
-
-    # QuEL-1 SE Riken8 の場合
-    # | MxFEの番号 | DAC番号 | (group, line)　 | ポート番号 | 機能 |
-    # |-----------|-------|----------------|-------|--|
-    # | 0       | 0     | (0, 0)         | 1     | Read-out |
-    # | 0       | 1     | (0, 1)         | 1     | Fogi |
-    # | 0       | 2     | (0, 2)         | 2     | Pump |
-    # | 0       | 3     | (0, 3)         | 3     | Ctrl |
-    # | 1       | 0     | (1, 0)         | 6     | Ctrl |
-    # | 1       | 1     | (1, 1)         | 7    | Ctrl |
-    # | 1       | 2     | (1, 2)         | 8    | Ctrl |
-    # | 1       | 3     | (1, 3)         | 9     | Ctrl |
-
-    def parse_qube_device_id(self, device_id):
-        devicd_id_regexp = re.compile(r"(quel1se-1-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})")
-        m = devicd_id_regexp.match(device_id)
-        if m:
-            device_name = m.group(1)
-            port_type = m.group(2)
-            port_string = m.group(3)
+    def chooseDeviceWrapper(self, *args, **kw) -> type[QuBE_DeviceBase]:
+        _, *args = args  # the first item is 'name'
+        args = DeviceConnectionInfoArgs(*args)
+        if args.device_type is DeviceType.ctrl:
+            return QuBE_ControlPort
+        elif args.device_type is DeviceType.readout:
+            return QuBE_ReadoutPort
+        elif args.device_type is DeviceType.fogi:
+            return QuBE_FogiPort
+        elif args.device_type is DeviceType.pump:
+            return QuBE_PumpPort
         else:
-            raise ValueError(f"Cannot parse device_id: {device_id}")
-        return device_name, port_type, port_string
+            raise ValueError(f"Unknown device type: {type}")
 
-    def get_dac_group_line_from_name(self, box, pmaper, name) -> tuple[int, int]:
-        _, role, port_string = self.parse_qube_device_id(name)
-        # if role == "readout":
-        #     for c in port_string:
-        #         port = int(c, 16)
-        #         group, line = pmaper.resolve_line(port)
-        #         if box._dev.is_output_line(group, line):  # select the output line
-        #             break
-        # else:
-        #     port = int(port_string, 16)
-        #     group, line = pmaper.resolve_line(port)
-        # return group, line
+    def findDevices(self) -> list[DeviceConnectionInfo]:
+        dev_conn_infos: list[DeviceConnectionInfo] = []
 
-        # TODO: fogi
-        port_group_map = {1: (0, 0), 2: (0, 2), 3: (0, 3), 6: (1, 0), 7: (1, 1), 8: (1, 2), 9: (1, 3)}
-        # print(f"get_dac_group_line_from_name port_string: {port_string} ")
-        port = int(port_string)
-        return port_group_map[port]
+        box_name_to_timecounter_offset = {
+            b.box_name: b.offset for b in self.chassisSkew.boxes
+        }
 
-    # def get_adc_group_line_from_name(self, box, pmaper, name):
-    #     # _, role, port_string = self.parse_qube_device_id(name)
-    #     # if role == "readout":
-    #     #     for c in port_string:
-    #     #         port = int(c, 16)
-    #     #         group, line = pmaper.resolve_line(port)
-    #     #         if box._dev.is_input_line(group, line):  # select the input line
-    #     #             break
-    #     # else:
-    #     #     raise Exception("Only readout line has adc.")
-    #     return group, line
+        for box_link in self.possibleLinks.boxes:
+            if box_link.name not in self._name_to_box_conn:
+                print(QSMessage.CHECKING_QUBEUNIT.format(box_link.name))
+                if not is_reachable(box_link.ipaddr_wss):
+                    print(
+                        sys._getframe().f_code.co_name,
+                        RuntimeError(QSMessage.ERR_HOST_NOTFOUND.format(box_link.name)),
+                    )
 
-    def instantiateChannel(self, name, channels, awg_ctrl, cap_ctrl, info):
-        box_type = self.box_info.get_box_type(name)
-        box_type_str = self.box_info.get_box_type_str(name)
-        ipfpga = info[QSConstants.SRV_IPFPGA_TAG]
-        iplsi = info[QSConstants.SRV_IPLSI_TAG]
-        ipsync = info[QSConstants.SRV_IPCLK_TAG]
-        box = Quel1Box.create(
-            ipaddr_wss=ipfpga,
-            boxtype=box_type,
-        )
-        # box.reconnect()
-        rmap = Quel1E7ResourceMapper(box.css, box.wss)
+                print(QSMessage.CNCTABLE_QUBEUNIT.format(box_link.name))
+                box = Quel1Box.create(
+                    ipaddr_wss=box_link.ipaddr_wss,
+                    boxtype=Quel1BoxType.fromstr(box_link.boxtype),
+                )
+                box.reconnect()
+                box_conn = BoxConnection(
+                    box_name=box_link.name,
+                    box=box,
+                    timecounter_offset=box_name_to_timecounter_offset[box_link.name],
+                )
+                self._name_to_box_conn[box_link.name] = box_conn
 
-        def gen_awg(name, role, chassis, channel, awg_ctrl, cap_ctrl):
-            pmaper = QubePortMapper(box_type_str)
-            group, line = self.get_dac_group_line_from_name(box, pmaper, name)
-            awg_ch_ids = []
-            # TODO: モニター
-            # rline = "m"
-            rline = "r"
-            # print(f"gen_awg() name: {name}, group: {group}, line: {line}, rline: {rline}")
-            chs = box._dev.get_channels_of_line(group, line)
-            for i in range(len(chs)):
-                awg_idx = rmap.get_awg_of_channel(group, line, i)
-                awg_ch_ids.append(awg_idx)
-
-            args = name, role
-            kw = dict(
-                awg_ctrl=awg_ctrl,
-                awg_ch_ids=awg_ch_ids,
-                chassis=chassis,
-                ipfpga=ipfpga,
-                iplsi=iplsi,
-                ipsync=ipsync,
-                device_type=box_type,
-                group=group,
-                line=line,
-                rline=rline,
+            box_conn = self._name_to_box_conn[box_link.name]
+            dev_conn_infos.extend(
+                create_device_connection_infos_from_box_connection(box_conn)
             )
-
-            return (name, args, kw)
-
-        def gen_mux(name, role, chassis, channel, awg_ctrl, cap_ctrl):
-            _name, _args, _kw = gen_awg(name, role, chassis, channel, awg_ctrl, cap_ctrl)
-            pmaper = QubePortMapper(box_type_str)
-            group, line = self.get_dac_group_line_from_name(box, pmaper, name)
-            # print(f"name: {name}, group: {group}, line: {line}")
-            # TODO: モニター: こちらはモニターの場合でも"r"のままでよい
-            cap_mod_id = rmap.get_capture_module_of_rline(group, "r")
-            # cap_mod_id = rmap.get_capture_module_of_rline(group, "m")
-            # print(f"cap_mod_id: {cap_mod_id}")
-            capture_units = CaptureModule.get_units(cap_mod_id)
-            # print(f"capture_units: {capture_units}")
-
-            kw = dict(
-                cap_ctrl=cap_ctrl,
-                capture_units=capture_units,
-                cap_mod_id=cap_mod_id,
-            )
-            _kw.update(kw)
-            return (_name, _args, _kw)
-
-        devices = []
-        for channel in channels:
-            # print(f"instantiateChannel: {channel}")
-            channel_type = channel[QSConstants.CNL_TYPE_TAG]
-            channel_name = name + "-" + channel[QSConstants.CNL_NAME_TAG]
-            # print(f"channel_type: {channel_type}, channel_name: {channel_name}")
-            # TODO fogiはスキップ
-            if "fogi" in channel_name:
-                continue
-
-            args = (
-                channel_name,
-                channel_type,
-                name,
-                channel,
-                awg_ctrl,
-                cap_ctrl,
-            )
-            to_be_added = (
-                gen_awg(*args)
-                if channel_type == QSConstants.CNL_CTRL_VAL
-                else (gen_mux(*args) if channel_type == QSConstants.CNL_READ_VAL else None)
-            )
-            if to_be_added is not None:
-                devices.append(to_be_added)
-        return devices
-
-    def instantiateQube(self, name, info):
-        try:
-            ipfpga = info[QSConstants.SRV_IPFPGA_TAG]
-            channels = info["channels"]
-        except Exception as e:
-            print(sys._getframe().f_code.co_name, e)
-            return list()
-
-        try:
-            awg_ctrl = AwgCtrl(ipfpga)  # AWG CONTROL (e7awgsw)
-            cap_ctrl = QuBECaptureCtrl(ipfpga)  # CAP CONTROL (inherited from e7awgsw)
-            awg_ctrl.initialize(*AWG.all())
-            cap_ctrl.initialize(*CaptureModule.all())
-        except Exception as e:
-            print(sys._getframe().f_code.co_name, e)
-            return list()
-
-        try:
-            devices = self.instantiateChannel(name, channels, awg_ctrl, cap_ctrl, info)
-        except Exception as e:
-            print("Exception!!! instantiateChannel")
-            print(sys._getframe().f_code.co_name, e)
-            devices = list()
-        return devices
-
-    @inlineCallbacks
-    def findDevices(self):  # @inlineCallbacks
-        found = []
-
-        for name in self.possibleLinks.keys():
-            print(QSMessage.CHECKING_QUBEUNIT.format(name))
-            # try:
-            #     res = pingger(self.possibleLinks[name][QSConstants.SRV_IPFPGA_TAG])
-            #     if 0 == res:
-            #         res = pingger(self.possibleLinks[name][QSConstants.SRV_IPLSI_TAG])
-            #     if 0 != res:
-            #         res = pingger(self.possibleLinks[name][QSConstants.SRV_IPCLK_TAG])
-            #     if 0 != res:
-            #         raise Exception(QSMessage.ERR_HOST_NOTFOUND.format(name))
-            # except Exception as e:
-            #     print(sys._getframe().f_code.co_name, e)
-            #     continue
-
-            print(QSMessage.CNCTABLE_QUBEUNIT.format(name))
-            devices = self.instantiateQube(name, self.possibleLinks[name])
-            found.extend(devices)
-
-            sync_ctrl = SequencerClient(
-                self.possibleLinks[name][QSConstants.SRV_IPCLK_TAG],
-                receiver_limit_by_bind=True,
-            )
-            self._sync_ctrl.update({name: sync_ctrl})
-            yield
-            # print(sys._getframe().f_code.co_name,found)
-        returnValue(found)
+        return dev_conn_infos
 
     @setting(10, "Reload Skew", returns=["b"])
     def reload_config_skew(self, c):
+        raise NotImplementedError("Unused API")
         """
         Reload skew adjustment time difference among chassis from the registry.
 
         Returns:
             success : True if successfuly obtained skew value from the registry
         """
-        reg = self._get_registry_service()
         try:
-            skew = yield reg.get(QSConstants.REGSKEW)
-            self.chassisSkew = json.loads(skew)
+            self.chassisSkew = yield self._get_skew_config()
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
             return False
@@ -352,7 +242,11 @@ class QuBE_Server(DeviceServer):
             dev.repetition_time = int(round(reptime["ns"]))
             return reptime
         else:
-            raise ValueError(QSMessage.ERR_REP_SETTING.format("Sequencer", QSConstants.DAQ_REPT_RESOL))
+            raise ValueError(
+                QSMessage.ERR_REP_SETTING.format(
+                    "Sequencer", QSConstants.DAQ_REPT_RESOL
+                )
+            )
 
     @setting(103, "DAQ Length", length=["v[s]"], returns=["v[s]"])
     def sequence_length(self, c, length=None):
@@ -377,8 +271,12 @@ class QuBE_Server(DeviceServer):
             return length
         else:
             raise ValueError(
-                QSMessage.ERR_REP_SETTING.format("Sequencer", QSConstants.DAQ_SEQL_RESOL)
-                + QSMessage.ERR_INVALID_RANG.format("daq_length", "128 ns", "{} ns".format(QSConstants.DAQ_MAXLEN))
+                QSMessage.ERR_REP_SETTING.format(
+                    "Sequencer", QSConstants.DAQ_SEQL_RESOL
+                )
+                + QSMessage.ERR_INVALID_RANG.format(
+                    "daq_length", "128 ns", "{} ns".format(QSConstants.DAQ_MAXLEN)
+                )
             )
 
     @setting(105, "DAQ Start", returns=["b"])
@@ -386,48 +284,9 @@ class QuBE_Server(DeviceServer):
         """
         Start data acquisition
 
-        The method name [daq_start()] is for backward compatibility with a former
-        version of quantum logic analyzer, and I like it. This method finds trigger
-        boards to readout FPGA circuits and give them to the boards. All the
-        enabled AWGs and MUXs are supposed to be in the current context [c] through
-        [._register_awg_channels()] and [_register_mux_channels()].
-
-        Compared to the previous implementation, this method does not require
-        [select_device()] before the call.
+        The method name [daq_start()] is for backward compatibility with a former version of quantum logic analyzer, and I like it.
         """
-        dev = self.selectedDevice(c)
-
-        if QSConstants.CNL_READ_VAL == dev.device_role:  # Set trigger board to capture units
-            self._readout_mux_start(c)
-
-        for chassis_name in c[QSConstants.ACQ_CNXT_TAG].keys():
-            for _dev, _m, _units in c[QSConstants.ACQ_CNXT_TAG][chassis_name]:
-                print(chassis_name, _units)  # DEBUG
-
-        for chassis_name in c[QSConstants.DAC_CNXT_TAG].keys():
-            _dev, _awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-            print(chassis_name, _awgs)  # DEBUG
         return True
-
-    def _readout_mux_start(self, c):
-        """
-        Find trigger AWG bords in multiple chassis
-
-        For each QuBE chassis, we have to select trigger AWG from the AWGs involved
-        in the operation. For each QuBE readout module, [_readout_mux_start()]
-        sets the trigger AWG and enables the capture units.
-
-        """
-        for chassis_name in c[QSConstants.ACQ_CNXT_TAG].keys():
-            if chassis_name not in c[QSConstants.DAC_CNXT_TAG].keys():
-                raise Exception(QSMessage.ERR_NOARMED_DAC)
-            else:
-                dev, awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-                trigger_board = list(awgs)[0]
-
-            for _dev, _module, _units in c[QSConstants.ACQ_CNXT_TAG][chassis_name]:
-                _dev.set_trigger_board(trigger_board, _units)
-        return
 
     @setting(106, "DAQ Trigger", returns=["b"])
     def daq_trigger(self, c):
@@ -443,43 +302,62 @@ class QuBE_Server(DeviceServer):
         delay = int(c[QSConstants.DAQ_SDLY_TAG] * QSConstants.SYNC_CLOCK + 0.5)
 
         chassis_list = c[QSConstants.DAC_CNXT_TAG].keys()
-        tentative_master = list(chassis_list)[0]
-        clock = (self._sync_ctrl[tentative_master].read_clock()[1] + delay) & 0xFFFFFFFFFFFFFFF0
-        # In a case where we use master FPGA
-        # board as a trigger source
-        # clock = self._master_ctrl.read_clock() + delay
-        for chassis_name in chassis_list:
-            skew = self.chassisSkew[chassis_name]
-            dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-            awg_bitmap = 0
-            for _awg in enabled_awgs:
-                if 0 <= _awg and _awg < 16:
-                    awg_bitmap += 1 << _awg
-            self._sync_ctrl[chassis_name].add_sequencer(clock + skew, awg_bitmap)
-            print(chassis_name, "kick at ", clock + skew, enabled_awgs)
+        box_conns = [self._name_to_box_conn[box_name] for box_name in chassis_list]
+        if not acquire_all_locks(
+            box_conns, c.ID, timeout_duration=BOXLOCK_TIMEOUT_DURATION
+        ):
+            raise RuntimeError(
+                "Failed to atomically acquire locks because they are held by another context."
+            )
 
+        # the first box is used as a tentative master
+        cur_timecounter = box_conns[0].get_latest_sysref_timecounter()
+        latest_trigger_timecounter = max(
+            bc.last_trigger_timecounter - bc.timecounter_offset for bc in box_conns
+        )
+        timecounter = (
+            max(latest_trigger_timecounter, cur_timecounter) + delay
+        ) & 0xFFFFFFFFFFFFFFF0
+
+        for bc in box_conns:
+            timecounter_box = timecounter + bc.timecounter_offset
+            assert bc.last_trigger_timecounter < timecounter
+            cap_task, awg_task = bc.start_capture_by_awg_trigger(
+                c.ID,
+                runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
+                channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
+                timecounter=timecounter_box,
+            )
+            bc.last_trigger_timecounter = timecounter_box
+            print(bc.box_name, "kick at ", timecounter_box)
+            c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
+            c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
+        release_all_locks(box_conns, c.ID)
         return True
 
     @setting(107, "DAQ Stop", returns=["b"])
     def daq_stop(self, c):
-        """
-        Wait until synchronous measurement is done.
+        deferreds = []
 
-        """
-        if 1 > len(c[QSConstants.DAC_CNXT_TAG].keys()):
-            return False  # Nothing to stop
+        for task_obj in c[QSConstants.AWG_TASK_TAG].values():
+            task_obj = cast(AwgTaskType, task_obj)
+            deferreds.append(threads.deferToThread(task_obj.result))
 
-        for chassis_name in c[QSConstants.DAC_CNXT_TAG].keys():
-            dev, enabled_awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-            concurrent_deferred_obj = self._thread_pool.submit(dev.stop_daq, list(enabled_awgs), c[QSConstants.DAQ_TOUT_TAG])
-            twisted_deferred_obj = future_to_deferred(concurrent_deferred_obj)
+        for task_obj in c[QSConstants.CAP_TASK_TAG].values():
+            task_obj = cast(CapTaskType, task_obj)
+            deferreds.append(threads.deferToThread(task_obj.result))
 
-            yield twisted_deferred_obj
+        dlist = defer.DeferredList(deferreds, fireOnOneErrback=True, consumeErrors=True)
 
-        returnValue(True)
+        dlist.addCallback(lambda _: True)
+        dlist.addErrback(lambda _: False)
+
+        return dlist
+
 
     @setting(112, "DAQ Clear", returns=["b"])
     def daq_clear(self, c):
+        raise NotImplementedError()
         """
         Clear registed control and readout channels from the device context.
 
@@ -491,6 +369,7 @@ class QuBE_Server(DeviceServer):
 
     @setting(113, "DAQ Terminate", returns=["b"])
     def daq_terminate(self, c):
+        raise NotImplementedError()
         """
         Force terminate a current running measurement
 
@@ -528,8 +407,7 @@ class QuBE_Server(DeviceServer):
 
     @setting(110, "DAC Channels", returns=["w"])
     def daq_channels(self, c):
-        """
-        Retrieve the number of available AWG channels. The number of available AWG c
+        """Retrieveout the number of available AWG channels. The number of available AWG c
         hannels is configured through adi_api_mod/v1.0.6/src/helloworld.c and the
         lane information is stored in the registry /Servers/QuBE/possible_links.
 
@@ -555,35 +433,32 @@ class QuBE_Server(DeviceServer):
                 True if successful.
         """
         dev = self.selectedDevice(c)
-        channels = np.atleast_1d(channels).astype(int)
-        if not dev.check_awg_channels(channels):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
+        channels = _convert_to_builtin_type(channels, ensure_list=True)
+        channels_of_port = dev.channels_of_port
+        if any(chan not in channels_of_port for chan in channels):
+            raise ValueError(
+                QSMessage.ERR_INVALID_ITEM.format("channel", channels_of_port)
+            )
         return self._register_awg_channels(c, dev, channels)
 
     def _register_awg_channels(self, c, dev, channels):
         """
         Register selected DAC AWG channels
 
-        The method [_register_awg_channels()] register the enabled AWG IDs to the device
-        context. This information is used in daq_start() and daq_trigger()
+        The method [_register_awg_channels()] register the enabled AWG IDs tothe device context.
+        This information is used in daq_start() and daq_trigger()
 
         Data structure:
-          qube010: (dev, set{0,1,2,3,...}),
-          qube011: (dev, set{0,2,15,..})
+          chassis_name00: set{(5, 1), ...}, # Quel1PortType=0, channel=1
+          chassis_name01: set{(3, 0), ...}
         """
         chassis_name = dev.chassis_name
 
-        if chassis_name not in c[QSConstants.DAC_CNXT_TAG].keys():
-            c[QSConstants.DAC_CNXT_TAG].update({chassis_name: (dev, set())})
+        if chassis_name not in c[QSConstants.DAC_CNXT_TAG]:
+            c[QSConstants.DAC_CNXT_TAG][chassis_name] = set()
 
-        _to_be_added = list()
-        for channel in channels:
-            _dev, awgs = c[QSConstants.DAC_CNXT_TAG][chassis_name]
-
-            _to_be_added = dev.get_awg_id(channel)
-            awgs.add(_to_be_added)
-            c[QSConstants.DAC_CNXT_TAG][chassis_name] = (_dev, awgs)
-
+        for chan in channels:
+            c[QSConstants.DAC_CNXT_TAG][chassis_name].add((dev.port_out, chan))
         return True
 
     @setting(201, "Upload Readout Parameters", muxchs=["*w", "w"], returns=["b"])
@@ -598,52 +473,37 @@ class QuBE_Server(DeviceServer):
                 multiplex channel   0 to 3 [QSConstants.ACQ_MULP-1]
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
 
-        muxchs = np.atleast_1d(muxchs).astype(int)
-        for _mux in muxchs:
-            if not dev.static_check_mux_channel_range(_mux):
-                raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
-        resp = dev.upload_readout_parameters(muxchs)
-        if resp:
-            resp = self._register_mux_channels(c, dev, muxchs)
-        return resp
+        muxchs = _convert_to_builtin_type(muxchs, ensure_list=True)
+        runits_of_port = dev.runits_of_port
+        if any(chan not in runits_of_port for chan in muxchs):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
+        for muxch in muxchs:
+            if dev.upload_readout_parameters(muxch):
+                self._register_mux_channels(c, dev, muxch)
+            else:
+                return False
+        return True
 
-    def _register_mux_channels(self, c, dev, selected_mux_channels):
+    def _register_mux_channels(self, c, dev, selected_mux_channel):
         """
-        Register selected readout channels
+        Register selected readout channel
 
-        The method [_register_mux_channels()] register the selected capture module
+        The method [_register_mux_channel()] register the selected capture module
         IDs and the selected capture units to the device context. This information
         is used in daq_start() and daq_trigger().
 
         """
         chassis_name = dev.chassis_name
-        module_id = dev.get_capture_module_id()
-        unit_ids = [dev.get_capture_unit_id(_s) for _s in selected_mux_channels]
 
-        if chassis_name not in c[QSConstants.ACQ_CNXT_TAG].keys():
-            c[QSConstants.ACQ_CNXT_TAG].update({chassis_name: list()})
+        if chassis_name not in c[QSConstants.ACQ_CNXT_TAG]:
+            c[QSConstants.ACQ_CNXT_TAG][chassis_name] = set()
 
-        registered_ids = [_id for _d, _id, _u in c[QSConstants.ACQ_CNXT_TAG][chassis_name]]
-        addition = False
-        try:
-            idx = registered_ids.index(module_id)
-        except ValueError:
-            c[QSConstants.ACQ_CNXT_TAG][chassis_name].append((dev, module_id, unit_ids))
-        else:
-            addition = True
-
-        if addition:
-            _dev, _module_id, registered_units = c[QSConstants.ACQ_CNXT_TAG][chassis_name][idx]
-            registered_units.extend([unit_id for unit_id in unit_ids if unit_id not in registered_units])
-            c[QSConstants.ACQ_CNXT_TAG][chassis_name][idx] = (
-                dev,
-                module_id,
-                registered_units,
-            )
-
+        c[QSConstants.ACQ_CNXT_TAG][chassis_name].add(
+            (dev.port_in, selected_mux_channel)
+        )
         return True
 
     @setting(
@@ -671,17 +531,22 @@ class QuBE_Server(DeviceServer):
                 number to set a single-channel waveform.
         """
         dev = self.selectedDevice(c)
-        channels = np.atleast_1d(channels).astype(int)
-        waveforms = np.atleast_2d(wavedata).astype(complex)
+        channels = _convert_to_builtin_type(channels, ensure_list=True)
+        waveforms = np.atleast_2d(wavedata).astype(np.complex64)
 
-        if not dev.check_awg_channels(channels):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
+        channels_of_port = dev.channels_of_port
+        if any(chan not in channels_of_port for chan in channels):
+            raise ValueError(
+                QSMessage.ERR_INVALID_ITEM.format("channel", channels_of_port)
+            )
 
         resp, number_of_chans, data_length = dev.check_waveform(waveforms, channels)
         if not resp:
             raise ValueError(QSMessage.ERR_INVALID_WAVD.format(number_of_chans))
 
-        return dev.upload_waveform(waveforms, channels)
+        for waveform, channel in zip(waveforms, channels):
+            dev.upload_waveform(waveform, channel)
+        return True
 
     @setting(203, "Download Waveform", muxchs=["*w", "w"], returns=["*c", "*2c"])
     def download_waveform(self, c, muxchs):
@@ -696,18 +561,34 @@ class QuBE_Server(DeviceServer):
         Returns:
             data    : *2c,*c
         """
+
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
 
-        muxchs = np.atleast_1d(muxchs).astype(int)
-        for _mux in muxchs:
-            if not dev.static_check_mux_channel_range(_mux):
-                raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        for awg_task in c[QSConstants.AWG_TASK_TAG].values():
+            awg_task = cast(AwgTaskType, awg_task)
+            awg_task.result()
 
-        data = dev.download_waveform(muxchs)
+        for cap_task in c[QSConstants.CAP_TASK_TAG].values():
+            cap_task = cast(CapTaskType, cap_task)
+            cap_task.result()
 
-        return data
+        waveforms = []
+        muxchs = _convert_to_builtin_type(muxchs, ensure_list=True)
+        for mux in muxchs:
+            if cap_task := c[QSConstants.CAP_TASK_TAG].get(dev.chassis_name, None):
+                cap_task = cast(BoxStartCapunitsByTriggerTask, cap_task)
+                reader = cap_task.result()
+                wavelist = reader[dev.port_in, mux].as_wave_list()
+                flatten_wavelist = []
+                for section in wavelist:
+                    for rep in section:
+                        flatten_wavelist.append(rep)
+                waveforms.append(np.hstack(flatten_wavelist))
+            else:
+                raise ValueError("Acquired waveforms not found.")
+        return np.vstack(waveforms).astype(complex)
 
     @setting(300, "Acquisition Count", acqcount=["w"], returns=["w"])
     def acquisition_count(self, c, acqcount=None):
@@ -737,17 +618,21 @@ class QuBE_Server(DeviceServer):
                 The number of acquisition in a single experiment. 1 to 8 can be set.
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
-        elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
+        if muxch not in (runits_of_port := dev.runits_of_port):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
         elif acqnumb is None:
             return dev.acquisition_number_of_windows[muxch]
         elif 0 < acqnumb and acqnumb <= QSConstants.ACQ_MAXNUMCAPT:
             dev.acquisition_number_of_windows[muxch] = acqnumb
             return acqnumb
         else:
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("Acquisition number of windows", 1, QSConstants.ACQ_MAXNUMCAPT))
+            raise ValueError(
+                QSMessage.ERR_INVALID_RANG.format(
+                    "Acquisition number of windows", 1, QSConstants.ACQ_MAXNUMCAPT
+                )
+            )
 
     @setting(
         302,
@@ -777,12 +662,15 @@ class QuBE_Server(DeviceServer):
                 Current window setting
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
-        elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
+        if muxch not in (runits_of_port := dev.runits_of_port):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
         elif window is None:
-            return [(T.Value(_s, "ns"), T.Value(_e, "ns")) for _s, _e in dev.acquisition_window[muxch]]
+            return [
+                (T.Value(_s, "ns"), T.Value(_e, "ns"))
+                for _s, _e in dev.acquisition_window[muxch]
+            ]
 
         wl = [(int(_w[0]["ns"] + 0.5), int(_w[1]["ns"] + 0.5)) for _w in window]
         if dev.static_check_acquisition_windows(wl):
@@ -838,17 +726,21 @@ class QuBE_Server(DeviceServer):
             mode     : s
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
-        elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
+        if muxch not in (runits_of_port := dev.runits_of_port):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
         elif mode is None:
             return dev.acquisition_mode[muxch]
         elif mode in QSConstants.ACQ_MODENUMBER:
             dev.set_acquisition_mode(muxch, mode)
             return mode
         else:
-            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("Acquisition mode", ",".join(QSConstants.ACQ_MODENUMBER)))
+            raise ValueError(
+                QSMessage.ERR_INVALID_ITEM.format(
+                    "Acquisition mode", ",".join(QSConstants.ACQ_MODENUMBER)
+                )
+            )
 
     @setting(304, "Acquisition Mux Enable", muxch=["w"], returns=["b", "*b"])
     def acquisition_mux_enable(self, c, muxch=None):
@@ -864,11 +756,16 @@ class QuBE_Server(DeviceServer):
         Returns:
             Enabled(True)/Disabled(False) status of the channel.
         """
+        raise NotImplementedError("Unused API")
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
+            raise Exception(
+                QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
+            )
         elif muxch is not None and not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+            raise ValueError(
+                QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1)
+            )
         else:
             chassis_name = dev.chassis_name
             resp = chassis_name in c[QSConstants.ACQ_CNXT_TAG].keys()
@@ -878,7 +775,9 @@ class QuBE_Server(DeviceServer):
                 module_enabled = c[QSConstants.ACQ_CNXT_TAG][chassis_name]
                 resp = True
                 try:
-                    idx = [_m for _d, _m, _u in module_enabled].index(dev.get_capture_module_id())
+                    idx = [_m for _d, _m, _u in module_enabled].index(
+                        dev.get_capture_module_id()
+                    )
                 except ValueError:
                     resp = False
             if resp and resp is not None and module_enabled is not None:
@@ -887,9 +786,16 @@ class QuBE_Server(DeviceServer):
                     resp = dev.get_capture_unit_id(muxch) in unit_enabled
                     result = True if resp else False
                 else:
-                    result = [(dev.get_capture_unit_id(i) in unit_enabled) for i in range(QSConstants.ACQ_MULP)]
+                    result = [
+                        (dev.get_capture_unit_id(i) in unit_enabled)
+                        for i in range(QSConstants.ACQ_MULP)
+                    ]
             else:
-                result = [False for _i in range(QSConstants.ACQ_MULP)] if muxch is None else False
+                result = (
+                    [False for _i in range(QSConstants.ACQ_MULP)]
+                    if muxch is None
+                    else False
+                )
             return result
 
     @setting(305, "Filter Pre Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
@@ -897,18 +803,27 @@ class QuBE_Server(DeviceServer):
         """
         Set complex FIR coefficients to a mux channel. (getting obsoleted)
         """
+        raise NotImplementedError("Unused API")
         self.acquisition_fir_coefficients(c, muxch, coeffs)
-        raise Exception("Tabuchi wants to rename the API to acquisition_fir_coefficients")
+        raise Exception(
+            "Tabuchi wants to rename the API to acquisition_fir_coefficients"
+        )
 
-    @setting(306, "Average Window Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
+    @setting(
+        306, "Average Window Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"]
+    )
     def set_window_coefficients(self, c, muxch, coeffs):
         """
         Set complex window coefficients to a mux channel. (getting obsoleted)
         """
         self.acquisition_window_coefficients(c, muxch, coeffs)
-        raise Exception("Tabuchi wants to rename the API to acquisition_window_coefficients")
+        raise Exception(
+            "Tabuchi wants to rename the API to acquisition_window_coefficients"
+        )
 
-    @setting(307, "Acquisition FIR Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"])
+    @setting(
+        307, "Acquisition FIR Coefficients", muxch=["w"], coeffs=["*c"], returns=["b"]
+    )
     def acquisition_fir_coefficients(self, c, muxch, coeffs):
         """
         Set complex FIR (finite impulse response) filter coefficients to a mux channel.
@@ -927,14 +842,16 @@ class QuBE_Server(DeviceServer):
             success: b
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
-        elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
+        if muxch not in (runits_of_port := dev.runits_of_port):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
         elif not dev.static_check_acquisition_fir_coefs(coeffs):
             raise ValueError(
                 QSMessage.ERR_INVALID_RANG.format("abs(coeffs)", 0, 1)
-                + QSMessage.ERR_INVALID_RANG.format("len(coeffs)", 1, QSConstants.ACQ_MAX_FCOEF)
+                + QSMessage.ERR_INVALID_RANG.format(
+                    "len(coeffs)", 1, QSConstants.ACQ_MAX_FCOEF
+                )
             )
         else:
             dev.set_acquisition_fir_coefficient(muxch, coeffs)
@@ -966,14 +883,16 @@ class QuBE_Server(DeviceServer):
             success: b
         """
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
-        elif not dev.static_check_mux_channel_range(muxch):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("muxch", 0, QSConstants.ACQ_MULP - 1))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
+        if muxch not in (runits_of_port := dev.runits_of_port):
+            raise ValueError(QSMessage.ERR_INVALID_ITEM.format("muxch", runits_of_port))
         elif not dev.static_check_acquisition_window_coefs(coeffs):
             raise ValueError(
                 QSMessage.ERR_INVALID_RANG.format("abs(coeffs)", 0, 1)
-                + QSMessage.ERR_INVALID_RANG.format("len(coeffs)", 1, QSConstants.ACQ_MAX_WCOEF)
+                + QSMessage.ERR_INVALID_RANG.format(
+                    "len(coeffs)", 1, QSConstants.ACQ_MAX_WCOEF
+                )
             )
         else:
             dev.set_acquisition_window_coefficient(muxch, coeffs)
@@ -997,15 +916,15 @@ class QuBE_Server(DeviceServer):
 
         """
         dev = self.selectedDevice(c)
-        # TODO: 後で消す
-        # print(f"dev.device_name: {dev.device_name}")
         if frequency is None:
             resp = dev.get_lo_frequency()
-            frequency = T.Value(resp, "MHz")
-        elif dev.static_check_lo_frequency(frequency["MHz"]):
-            dev.set_lo_frequency(frequency["MHz"])
+            frequency = T.Value(resp, "Hz")
+        elif dev.static_check_lo_frequency(frequency["Hz"]):
+            dev.set_lo_frequency(frequency["Hz"])
         else:
-            raise ValueError(QSMessage.ERR_FREQ_SETTING.format("LO", QSConstants.DAC_LO_RESOL))
+            raise ValueError(
+                QSMessage.ERR_FREQ_SETTING.format("LO", QSConstants.DAQ_LO_RESOL)
+            )
         return frequency
 
     @setting(401, "Frequency TX NCO", frequency=["v[Hz]"], returns=["v[Hz]"])
@@ -1044,9 +963,9 @@ class QuBE_Server(DeviceServer):
         dev = self.selectedDevice(c)
         if frequency is None:
             resp = dev.get_dac_coarse_frequency()
-            frequency = T.Value(resp, "MHz")
+            frequency = T.Value(resp, "Hz")
         else:
-            dev.set_dac_coarse_frequency(frequency["MHz"])
+            dev.set_dac_coarse_frequency(frequency["Hz"])
         return frequency
 
     @setting(
@@ -1077,16 +996,21 @@ class QuBE_Server(DeviceServer):
 
         """
         dev = self.selectedDevice(c)
-        if not dev.check_awg_channels([channel]):
-            raise ValueError(QSMessage.ERR_INVALID_RANG.format("awg index", 0, dev.number_of_awgs - 1))
+        if channel not in (channels_of_port := dev.channels_of_port):
+            raise ValueError(
+                QSMessage.ERR_INVALID_ITEM.format("channel", channels_of_port)
+            )
+
         elif frequency is None:
             resp = dev.get_dac_fine_frequency(channel)
-            frequency = T.Value(resp, "MHz")
-        elif dev.static_check_dac_fine_frequency(frequency["MHz"]):
-            dev.set_dac_fine_frequency(channel, frequency["MHz"])
+            frequency = T.Value(resp, "Hz")
+        elif dev.static_check_dac_fine_frequency(frequency["Hz"]):
+            dev.set_dac_fine_frequency(channel, frequency["Hz"])
         else:
             raise ValueError(
-                QSMessage.ERR_FREQ_SETTING.format("TX Fine NCO", QSConstants.DAC_FNCO_RESOL)
+                QSMessage.ERR_FREQ_SETTING.format(
+                    "TX Fine NCO", QSConstants.DAC_FNCO_RESOL
+                )
                 + "\n"
                 + QSMessage.ERR_INVALID_RANG.format(
                     "TX Fine NCO frequency",
@@ -1099,9 +1023,9 @@ class QuBE_Server(DeviceServer):
     @setting(403, "Frequency RX NCO", frequency=["v[Hz]"], returns=["v[Hz]"])
     def coarse_rx_nco_frequency(self, c, frequency=None):
         # dev = self.selectedDevice(c)
-        # if QSConstants.CNL_READ_VAL != dev.device_role:
+        # if QSConstant_?s.CNL_READ_VAL != dev.device_role:
         #     raise Exception(
-        #         QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
+        #         QSMessage.ERR_INVALID_DEV.format("readout", dev.name)
         #     )
         # elif frequency is None:
         #     resp = dev.get_adc_coarse_frequency()
@@ -1118,13 +1042,13 @@ class QuBE_Server(DeviceServer):
 
         # TODO: static_check_adc_coarse_frequency
         dev = self.selectedDevice(c)
-        if QSConstants.CNL_READ_VAL != dev.device_role:
-            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name))
+        if dev.device_type is not DeviceType.readout:
+            raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
         elif frequency is None:
             resp = dev.get_adc_coarse_frequency()
-            frequency = T.Value(resp, "MHz")
+            frequency = T.Value(resp, "Hz")
         else:
-            dev.set_adc_coarse_frequency(frequency["MHz"])
+            dev.set_adc_coarse_frequency(frequency["Hz"])
         return frequency
 
     @setting(404, "Frequency Sideband", sideband=["s"], returns=["s"])
@@ -1149,9 +1073,22 @@ class QuBE_Server(DeviceServer):
             raise Exception(
                 QSMessage.ERR_INVALID_ITEM.format(
                     "The sideband string",
-                    "{} or {}".format(QSConstants.CNL_MXUSB_VAL, QSConstants.CNL_MXLSB_VAL),
+                    "{} or {}".format(
+                        QSConstants.CNL_MXUSB_VAL, QSConstants.CNL_MXLSB_VAL
+                    ),
                 )
             )
         else:
             dev.set_mix_sideband(sideband)
         return sideband
+
+
+def _convert_to_builtin_type(np_array, ensure_list=False):
+    if isinstance(np_array, np.ndarray):
+        ret = np_array.tolist()  # 0D array is converted to a simple Python "scalar"
+    else:
+        ret = np_array
+    if ensure_list:
+        if not isinstance(ret, list):
+            ret = [ret]
+    return ret

@@ -3,9 +3,8 @@ import os
 import subprocess
 import sys
 
-from e7awgsw import CaptureCtrl
-from e7awgsw.memorymap import CaptureMasterCtrlRegs
-
+# from e7awgsw import CaptureCtrl
+# from e7awgsw.memorymap import CaptureMasterCtrlRegs
 from .constants import QSConstants
 
 
@@ -20,6 +19,11 @@ def pingger(host):
     return resp
 
 
+def is_reachable(target):
+    return pingger(target) == 0
+
+
+"""
 ############################################################
 #
 # e7awgsw wrappers
@@ -50,6 +54,7 @@ class QuBECaptureCtrl(CaptureCtrl):
                 0,
             )
             self._CaptureCtrl__deselect_ctrl_target(*capture_unit_id_list)
+"""
 
 
 ############################################################

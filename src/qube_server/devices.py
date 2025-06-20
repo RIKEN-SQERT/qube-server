@@ -1,95 +1,126 @@
+from __future__ import annotations
+
 import copy
-import sys
-import traceback
+from abc import abstractmethod
+from enum import Enum, auto
+from typing import NamedTuple, Optional, TypedDict, cast
 
 import numpy as np
-from e7awgsw import (
-    CaptureParam,
-    DspUnit,
-    WaveSequence,
-)
 from labrad.devices import DeviceWrapper
-from quel_ic_config import Quel1Box
-from twisted.internet.defer import inlineCallbacks
+from quel_ic_config import AwgParam, CapParam, CapSection, Quel1PortType, WaveChunk
 
+from .box_connection import BoxConnection
 from .constants import QSConstants, QSMessage
 
 
-############################################################
-#
-# DEVICE WRAPPERS
-#
-# X class tree
-#
-# labrad.devices.DeviceWrapper
-#  |
-#  + QuBE_DeviceBase
-#    |
-#    + QuBE_ControlFPGA -.
-#    |                    .
-#    |                     +-+-- QuBE_ControlLine ----------.
-#    |                    /  |    |                          .
-#    + QuBE_ControlLSI --/   |    + QuBE_ReadoutLine ----+--- .-- QuBE_ReadoutLine_debug_otasuke
-#                            |                          /      .
-#                            +-- QuBE_Device_debug_otasuke ----+- QuBE_ControlLine_debug_otasuke
-#
+class DeviceType(Enum):
+    ctrl = auto()
+    readout = auto()
+    fogi = auto()
+    pump = auto()
+
+
+class DeviceConnectionInfo(NamedTuple):
+    """A set of Arguments for DeviceWrapper.connect"""
+
+    name: str
+    args: DeviceConnectionInfoArgs
+    kwargs: DeviceConnectionInfoKwargs
+
+
+class DeviceConnectionInfoArgs(NamedTuple):
+    box_conn: BoxConnection
+    device_type: DeviceType
+    port_in: Optional[Quel1PortType]
+    port_out: Optional[Quel1PortType]
+
+
+class DeviceConnectionInfoKwargs(TypedDict): ...
+
+
+def create_device_connection_infos_from_box_connection(
+    box_conn: BoxConnection,
+) -> list[DeviceConnectionInfo]:
+    dev_conn_infos: list[DeviceConnectionInfo] = []
+
+    def _create_boxport_str(box_port: Quel1PortType, port_prefix: str = "") -> str:
+        if isinstance(box_port, int):
+            return f"{port_prefix}{box_port:02d}"
+        elif isinstance(box_port, tuple) and len(box_port) == 2:
+            return f"{port_prefix}{box_port[0]:02d}-{box_port[1]:02d}"
+
+    for input_port in box_conn._box.get_read_input_ports():
+        paired_output_ports = box_conn._box.get_loopbacks_of_port(input_port)
+        if len(paired_output_ports) < 1:
+            continue
+        paired_output_port = paired_output_ports.pop()
+
+        name = f"{box_conn.box_name}-{_create_boxport_str(input_port, port_prefix='in')}-{_create_boxport_str(paired_output_port, port_prefix='out')}"
+        dev_conn_infos.append(
+            DeviceConnectionInfo(
+                name=name,
+                args=DeviceConnectionInfoArgs(
+                    box_conn=box_conn,
+                    device_type=DeviceType.readout,
+                    port_in=input_port,
+                    port_out=paired_output_port,
+                ),
+                kwargs=DeviceConnectionInfoKwargs(),
+            )
+        )
+
+    for output_port in box_conn._box.get_output_ports():
+        name = (
+            f"{box_conn.box_name}-{_create_boxport_str(output_port, port_prefix='out')}"
+        )
+        dev_conn_infos.append(
+            DeviceConnectionInfo(
+                name=name,
+                args=DeviceConnectionInfoArgs(
+                    box_conn=box_conn,
+                    device_type=DeviceType.ctrl,
+                    port_in=None,
+                    port_out=output_port,
+                ),
+                kwargs=DeviceConnectionInfoKwargs(),
+            )
+        )
+    return dev_conn_infos
+
+
 class QuBE_DeviceBase(DeviceWrapper):
-    @inlineCallbacks
-    def connect(self, *args, **kw):  # @inlineCallbacks
-        name, role = args
-        self._name = name
-        self._role = role
-        self._chassis = kw["chassis"]
+    def connect(self, *args, **kwargs):
+        args = DeviceConnectionInfoArgs(*args)
+        kwargs = cast(DeviceConnectionInfoKwargs, kwargs)
 
-        print(QSMessage.CONNECTING_CHANNEL.format(name))
-        yield self.get_connected(*args, **kw)
-        yield print(QSMessage.CONNECTED_CHANNEL.format(self._name))
+        print(QSMessage.CONNECTING_CHANNEL.format(self.name))
+        self.box_conn: BoxConnection = args.box_conn
+        self._type = args.device_type
+        self._initialize(args)
+        print(QSMessage.CONNECTED_CHANNEL.format(self.name))
 
-    @inlineCallbacks
-    def get_connected(self, *args, **kwargs):  # @inlineCallbacks
-        yield
+    @abstractmethod
+    def _initialize(self, args: DeviceConnectionInfoArgs): ...
 
     @property
-    def device_name(self):  # @property
-        return self._name
-
-    @property
-    def device_role(self):  # @property
-        return self._role
+    def device_type(self) -> DeviceType:
+        return self._type
 
     @property
     def chassis_name(self):
-        return self._chassis
+        return self.box_conn.box_name
 
     def static_check_value(self, value, resolution, multiplier=50, include_zero=False):
-        resp = resolution > multiplier * abs(((2 * value + resolution) % (2 * resolution)) - resolution)
+        resp = resolution > multiplier * abs(
+            ((2 * value + resolution) % (2 * resolution)) - resolution
+        )
         if resp:
-            resp = ((2 * value + resolution) // (2 * resolution)) > 0 if not include_zero else True
+            resp = (
+                ((2 * value + resolution) // (2 * resolution)) > 0
+                if not include_zero
+                else True
+            )
         return resp
-
-
-class QuBE_Control_FPGA(QuBE_DeviceBase):
-    @inlineCallbacks
-    def get_connected(self, *args, **kw):  # @inlineCallbacks
-        yield super(QuBE_Control_FPGA, self).get_connected(*args, **kw)
-
-        self.__initialized = False
-        try:
-            self._shots = QSConstants.DAQ_INITSHOTS
-            self._reptime = QSConstants.DAQ_INITREPTIME
-            self._seqlen = QSConstants.DAQ_INITLEN
-
-            self._awg_ctrl = kw["awg_ctrl"]
-            self._awg_ch_ids = kw["awg_ch_ids"]
-            self._awg_chs = len(self._awg_ch_ids)
-
-            self.__initialized = True
-        except Exception as e:
-            print(sys._getframe().f_code.co_name, e)
-
-        if self.__initialized:
-            pass
-        yield
 
     @property
     def number_of_shots(self):  # @property
@@ -105,7 +136,10 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
 
     @repetition_time.setter
     def repetition_time(self, value_in_ns):  # @repetition_time.setter
-        self._reptime = int(((value_in_ns + QSConstants.DAQ_REPT_RESOL / 2) // QSConstants.DAQ_REPT_RESOL) * QSConstants.DAQ_REPT_RESOL)
+        self._reptime = (
+            int(value_in_ns / QSConstants.DAQ_REPT_RESOL + 0.5)
+            * QSConstants.DAQ_REPT_RESOL
+        )
 
     @property
     def sequence_length(self):  # @property
@@ -115,26 +149,24 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
     def sequence_length(self, value):  # @sequence_length.setter
         self._seqlen = value
 
+
+class QuBE_ControlPort(QuBE_DeviceBase):
+    def _initialize(self, args: DeviceConnectionInfoArgs):
+        assert args.port_out is not None
+        self.port_out: Quel1PortType = args.port_out
+
     @property
-    def number_of_awgs(self):  # @property
-        return self._awg_chs
+    def channels_of_port(self):
+        return self.box_conn.box_unsafe.get_channels_of_port(self.port_out)
 
-    def get_awg_id(self, channel):
-        return self._awg_ch_ids[channel]
-
-    def check_awg_channels(self, channels):
-        for _c in channels:
-            if _c < 0 or self.number_of_awgs <= _c:
-                return False
-        return True
-
+    # TODO: check later
     def check_waveform(self, waveforms, channels):
         chans, length = waveforms.shape
 
         help = 1
         resp = chans == len(channels)
         if resp:
-            resp = chans <= self.number_of_awgs
+            resp = all(c in self.channels_of_port for c in channels)
             help += 1
         if resp:
             resp = QSConstants.DAC_WVSAMP_IVL * length == self.sequence_length
@@ -151,33 +183,29 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
         else:
             return (False, help, None)
 
-    def upload_waveform(self, waveforms, channels):
-        wait_words = int(((self.repetition_time - self.sequence_length) + QSConstants.DAC_WORD_IVL / 2) // QSConstants.DAC_WORD_IVL)
-
-        for _waveform, _channel in zip(waveforms, channels):
-            wave_seq = WaveSequence(num_wait_words=0, num_repeats=self.number_of_shots)
-            iq_samples = list(zip(*self.static_DACify(_waveform)))
-            wave_seq.add_chunk(iq_samples=iq_samples, num_blank_words=wait_words, num_repeats=1)
-            self._awg_ctrl.set_wave_sequence(self._awg_ch_ids[_channel], wave_seq)
-        return True
-
-    def start_daq(self, awg_ids):  # OBSOLETED. For multi-chassis
-        self._awg_ctrl.start_awgs(*awg_ids)  # operation, synchronization has
-        # to be made using SequencerClinet.
-
-    def stop_daq(self, awg_ids, timeout):
-        self._awg_ctrl.wait_for_awgs_to_stop(timeout, *awg_ids)
-        self._awg_ctrl.clear_awg_stop_flags(*awg_ids)
-
-    def terminate_daq(self, awg_ids):
-        self._awg_ctrl.terminate_awgs(*awg_ids)
-        self._awg_ctrl.clear_awg_stop_flags(*awg_ids)
-
-    def static_DACify(self, waveform):
-        return (
-            (np.real(waveform) * QSConstants.DAC_BITS_POW_HALF).astype(int),
-            (np.imag(waveform) * QSConstants.DAC_BITS_POW_HALF).astype(int),
+    def upload_waveform(self, waveform, channel):
+        wait_words = int(
+            (
+                (self.repetition_time - self.sequence_length)
+                + QSConstants.DAC_WORD_IVL / 2
+            )
+            // QSConstants.DAC_WORD_IVL
         )
+
+        awg_param = AwgParam(num_wait_word=0, num_repeat=self.number_of_shots)
+        waveform_name = f"{self.name}-{channel}"
+        self.box_conn.box_unsafe.register_wavedata(
+            port=self.port_out, channel=channel, name=waveform_name, iq=waveform
+        )
+        awg_param.chunks.append(
+            WaveChunk(
+                name_of_wavedata=waveform_name, num_blank_word=wait_words, num_repeat=1
+            )
+        )
+        self.box_conn.box_unsafe.config_channel(
+            port=self.port_out, channel=channel, awg_param=awg_param
+        )
+        return True
 
     def static_check_repetition_time(self, reptime_in_nanosec):
         resolution = QSConstants.DAQ_REPT_RESOL
@@ -190,49 +218,16 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
             resp = seqlen_in_nanosec < QSConstants.DAQ_MAXLEN
         return resp
 
-
-class QuBE_Control_LSI(QuBE_DeviceBase):
-    @inlineCallbacks
-    def get_connected(self, *args, **kw):  # @inlineCallbacks
-        yield super(QuBE_Control_LSI, self).get_connected(*args, **kw)
-
-        try:
-            ipfpga = kw["ipfpga"]
-            device_type = kw["device_type"]
-
-            box = Quel1Box.create(
-                ipaddr_wss=ipfpga,
-                boxtype=device_type,
-            )
-            # TODO: reconnect
-            box.reconnect()
-            # use only box.css
-            self._css = box.css
-            self._group = kw["group"]
-            self._line = kw["line"]
-            self._rline = kw["rline"]
-
-            # # DEBUG: for buffered operation, not used.
-            # self._lo_frequency = self.get_lo_frequency()
-            # self._coarse_frequency = self.get_dac_coarse_frequency()
-            # # DEBUG: for buffered operation, partly used.
-
-        except Exception as e:
-            print("Exception!!!!!!!!")
-            print(sys._getframe().f_code.co_name, e)
-            traceback.print_exc()  # DEBUG
-
-        yield
-
     def get_lo_frequency(self):
-        return self._css.get_lo_multiplier(self._group, self._line) * 100
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        return dumped["lo_freq"]
 
-    def set_lo_frequency(self, freq_in_mhz):
-        return self._css.set_lo_multiplier(self._group, self._line, int(freq_in_mhz // 100))
+    def set_lo_frequency(self, freq):
+        self.box_conn.box_unsafe.config_port(self.port_out, lo_freq=freq)
 
     def get_mix_sideband(self):
-        resp = self._css.get_sideband(self._group, self._line)
-        if resp == "U":
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        if dumped["sideband"] == "U":
             return QSConstants.CNL_MXUSB_VAL
         else:
             return QSConstants.CNL_MXLSB_VAL
@@ -242,77 +237,59 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
             qwsb = "U"
         else:
             qwsb = "L"
-        self._css.set_sideband(self._group, self._line, qwsb)
-        # self._mix_usb_lsb = sideband
+        self.box_conn.box_unsafe.config_port(self.port_out, sideband=qwsb)
 
     def get_dac_coarse_frequency(self):
-        return self._css.get_dac_cnco(self._group, self._line) / 1e6
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        return dumped["cnco_freq"]
 
-    def set_dac_coarse_frequency(self, freq_in_mhz):
-        self._css.set_dac_cnco(self._group, self._line, 1e6 * freq_in_mhz)
-        self._coarse_frequency = freq_in_mhz
+    def set_dac_coarse_frequency(self, freq):
+        self.box_conn.box_unsafe.config_port(self.port_out, cnco_freq=freq)
 
     def get_dac_fine_frequency(self, channel):
-        return self._css.get_dac_fnco(self._group, self._line, channel) / 1e6
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        return dumped["channels"][channel]["fnco_freq"]
 
-    def set_dac_fine_frequency(self, channel, freq_in_mhz):
-        self._css.set_dac_fnco(self._group, self._line, channel, 1e6 * freq_in_mhz)
+    def set_dac_fine_frequency(self, channel, freq):
+        self.box_conn.box_unsafe.config_channel(self.port_out, channel, fnco_freq=freq)
 
-    def static_check_lo_frequency(self, freq_in_mhz):
+    def static_check_lo_frequency(self, freq):
         resolution = QSConstants.DAQ_LO_RESOL
+        freq_in_mhz = freq / 1_000_000
         return self.static_check_value(freq_in_mhz, resolution)
 
-    def static_check_dac_coarse_frequency(self, freq_in_mhz):
+    def static_check_dac_coarse_frequency(self, freq):
         resolution = QSConstants.DAC_CNCO_RESOL
+        freq_in_mhz = freq / 1_000_000
         return self.static_check_value(freq_in_mhz, resolution)
 
-    def static_check_dac_fine_frequency(self, freq_in_mhz):
+    def static_check_dac_fine_frequency(self, freq):
         resolution = QSConstants.DAC_FNCO_RESOL
+        freq_in_mhz = freq / 1_000_000
         resp = self.static_check_value(freq_in_mhz, resolution, include_zero=True)
         return resp
 
 
-class QuBE_ControlLine(QuBE_Control_FPGA, QuBE_Control_LSI):
-    @inlineCallbacks
-    def get_connected(self, *args, **kw):  # @inlineCallbacks
-        super(QuBE_ControlLine, self).get_connected(*args, **kw)
-        yield
+class QuBE_ReadoutPort(QuBE_ControlPort):
+    def _initialize(self, args: DeviceConnectionInfoArgs):
+        self.box_conn: BoxConnection = args.box_conn
+        assert args.port_in is not None
+        self.port_in: Quel1PortType = args.port_in
+        assert args.port_out is not None
+        self.port_out: Quel1PortType = args.port_out
 
+        self._window = [QSConstants.ACQ_INITWINDOW for i in range(QSConstants.ACQ_MULP)]
+        self._window_coefs = [
+            QSConstants.ACQ_INITWINDCOEF for i in range(QSConstants.ACQ_MULP)
+        ]
+        self._fir_coefs = [
+            QSConstants.ACQ_INITFIRCOEF for i in range(QSConstants.ACQ_MULP)
+        ]
+        self._acq_mode = [QSConstants.ACQ_INITMODE for i in range(QSConstants.ACQ_MULP)]
 
-class QuBE_ReadoutLine(QuBE_ControlLine):
-    @inlineCallbacks
-    def get_connected(self, *args, **kw):  # @inlineCallbacks
-        yield super(QuBE_ReadoutLine, self).get_connected(*args, **kw)
-
-        self.__initialized = False
-        try:
-            # TODO: 後で消す
-            # print("start QuBE_ReadoutLine")
-
-            self._cap_ctrl = kw["cap_ctrl"]
-            self._cap_mod_id = kw["cap_mod_id"]
-            self._cap_unit = kw["capture_units"]
-
-            # TODO: 後で消す
-            ##print("QuBE_ReadoutLine kw:", kw)
-            self._rx_coarse_frequency = self.get_adc_coarse_frequency()
-            # print(self._name,'rxnco',self._rx_coarse_frequency)
-            self.__initialized = True
-        except Exception as e:
-            print("Exception: QuBE_ReadoutLine!!!!!!!!")
-            print(sys._getframe().f_code.co_name, e)
-
-        if self.__initialized:
-            self._window = [QSConstants.ACQ_INITWINDOW for i in range(QSConstants.ACQ_MULP)]
-            self._window_coefs = [QSConstants.ACQ_INITWINDCOEF for i in range(QSConstants.ACQ_MULP)]
-            self._fir_coefs = [QSConstants.ACQ_INITFIRCOEF for i in range(QSConstants.ACQ_MULP)]
-            self._acq_mode = [QSConstants.ACQ_INITMODE for i in range(QSConstants.ACQ_MULP)]
-
-    def get_capture_module_id(self):
-        return self._cap_mod_id
-
-    def get_capture_unit_id(self, mux_channel):
-        return self._cap_unit[mux_channel]
+    @property
+    def runits_of_port(self):
+        return self.box_conn.box_unsafe.get_runits_of_port(self.port_in)
 
     @property
     def acquisition_window(self):  # @property
@@ -330,21 +307,21 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
 
     def set_acquisition_fir_coefficient(self, muxch, coeffs):
         def fircoef_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int) + 1j * (
-                np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF
-            ).astype(int)
+            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(
+                int
+            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int)
 
         self._fir_coefs[muxch] = fircoef_DACify(coeffs)
 
     def set_acquisition_window_coefficient(self, muxch, coeffs):
         def window_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int) + 1j * (
-                np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF
-            ).astype(int)
+            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(
+                int
+            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int)
 
         self._window_coefs[muxch] = window_DACify(coeffs)
 
-    def upload_readout_parameters(self, muxchs):
+    def upload_readout_parameters(self, muxch):
         """
         Upload readout parameters
 
@@ -369,40 +346,53 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
         - The capture word is defined as the four multiple of sampling points. It
           corresponds to 4 * ADC_BBSAMP_IVL = ACQ_CAPW_RESOL (nanoseconds).
         """
-        repetition_word = int((self.repetition_time + QSConstants.ACQ_CAPW_RESOL // 2) // QSConstants.ACQ_CAPW_RESOL)
-        for mux in muxchs:
-            param = CaptureParam()
-            win_word = list()
-            for _s, _e in self.acquisition_window[mux]:  # flatten window (start,end) to a series
-                # of timestamps
-                win_word.append(int((_s + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL))
-                win_word.append(int((_e + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL))
-            win_word.append(repetition_word)
+        repetition_word = int(
+            (self.repetition_time + QSConstants.ACQ_CAPW_RESOL // 2)
+            // QSConstants.ACQ_CAPW_RESOL
+        )
+        param = CapParam()
+        win_word = list()
+        for _s, _e in self.acquisition_window[
+            muxch
+        ]:  # flatten window (start,end) to a series
+            # of timestamps
+            win_word.append(
+                int((_s + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL)
+            )
+            win_word.append(
+                int((_e + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL)
+            )
+        win_word.append(repetition_word)
 
-            param.num_integ_sections = int(self.number_of_shots)
-            _s0 = win_word.pop(0)
-            param.capture_delay = _s0
-            win_word[-1] += _s0  # win_word[-1] is the end time of a sin-
-            # gle sequence. As the repeat duration
-            # is offset by capture_delay, we have to
-            # add the capture_delay time.
-            while len(win_word) > 1:
-                _e = win_word.pop(0)
-                _s = win_word.pop(0)
-                blank_length = _s - _e
-                section_length = _e - _s0
-                _s0 = _s
-                param.add_sum_section(section_length, blank_length)
+        param.num_repeat = int(self.number_of_shots)
+        _s0 = win_word.pop(0)
+        param.num_wait_word = _s0
+        win_word[-1] += _s0  # win_word[-1] is the end time of a single sequence.
+        # As the repeat duration is offset by capture_delay, we have to add the
+        # capture_delay time.
+        idx = 0
+        while len(win_word) > 1:
+            _e = win_word.pop(0)
+            _s = win_word.pop(0)
+            blank_length = _s - _e
+            section_length = _e - _s0
+            _s0 = _s
+            param.sections.append(
+                CapSection(
+                    name=f"{idx}",
+                    num_capture_word=section_length,
+                    num_blank_word=blank_length,
+                )
+            )
+            idx += 1
 
-            self.configure_readout_mode(mux, param, self._acq_mode[mux])
-            # import pickle
-            # import base64
-            # print('mux setup')
-            # print(base64.b64encode(pickle.dumps(param)))
-            self._cap_ctrl.set_capture_params(self._cap_unit[mux], param)
+        self.configure_readout_mode(muxch, param, self._acq_mode[muxch])
+        self.box_conn.box_unsafe.config_runit(
+            port=self.port_in, runit=muxch, capture_param=param
+        )
         return True
 
-    def configure_readout_mode(self, mux, param, mode):
+    def configure_readout_mode(self, mux, param: CapParam, mode):
         """
         Configure readout parametes to acquisition modes.
 
@@ -414,145 +404,51 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
             mode      : character
                 Acceptable parameters are '1', '2', '3', 'A', 'B'
         """
-        dsp = self.configure_readout_dsp(mux, param, mode)
-        param.sel_dsp_units_to_enable(*dsp)
-
-    def configure_readout_dsp(self, mux, param, mode):
-        dsp = []
         decim, averg, summn = QSConstants.ACQ_MODEFUNC[mode]
 
-        resp = self.configure_readout_decimation(mux, param, decim)
-        dsp.extend(resp)
-        resp = self.configure_readout_averaging(mux, param, averg)
-        dsp.extend(resp)
-        resp = self.configure_readout_summation(mux, param, summn)
-        dsp.extend(resp)
-        return dsp
+        if decim:
+            # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
+            param.realfirs_real_coeff = self._fir_coefs[mux].real
+            param.realfirs_imag_coeff = self._fir_coefs[mux].imag
+            param.realfirs_enable = True
+            param.decimation_enable = True
+        if averg:
+            # [Averaging] Averaging datapoints for all experiments.
+            param.integration_enable = True
+            param.num_repeat = int(self.number_of_shots)
+        if summn:
+            # [Summation] For a given readout window, the DSP apply complex window filter.
+            # (This is equivalent to the convolution in frequency domain of a filter
+            # function with frequency offset). Then, DSP sums all the datapoints
+            # in the readout window.
+            # resp = self.configure_readout_summation(mux, param, summn)
+            param.sum_enable = True
+            param.sum_range = (0, param.num_section)
+            param.window_enable = True
+            param.window_coeff = self._window_coefs[mux]
 
-    def configure_readout_decimation(self, mux, param, decimation):
-        """
-        Configure readout mux channel parameters.
-
-        [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-
-        Args:
-            param     : e7awgsw.captureparam.CaptureParam
-            decimation: bool
-        Returns:
-            dsp       : list.
-                The list of enabled e7awgsw.hwdefs.DspUnit objects
-        """
-        dsp = list()
-        if decimation:
-            param.complex_fir_coefs = list(self._fir_coefs[mux])
-            dsp.append(DspUnit.COMPLEX_FIR)
-            dsp.append(DspUnit.DECIMATION)
-        return dsp
-
-    def configure_readout_averaging(self, mux, param, averaging):
-        """
-        Configure readout mux channel parameters.
-
-        [Averaging] Averaging datapoints for all experiments.
-
-        Args:
-            param    : e7awgsw.captureparam.CaptureParam
-            average  : bool
-        Returns:
-            dsp      : list.
-                The list of enabled e7awgsw.hwdefs.DspUnit objects
-        """
-        dsp = list()
-        if averaging:
-            dsp.append(DspUnit.INTEGRATION)
-        param.num_integ_sections = int(self.number_of_shots)
-        return dsp
-
-    def configure_readout_summation(self, mux, param, summation):
-        """
-        Configure readout mux channel parameters.
-
-        [Summation] For a given readout window, the DSP apply complex window filter.
-        (This is equivalent to the convolution in frequency domain of a filter
-        function with frequency offset). Then, DSP sums all the datapoints
-        in the readout window.
-
-        Args:
-            param    : e7awgsw.captureparam.CaptureParam
-            summation: bool
-        Returns:
-            dsp      : list
-                The list of enabled e7awgsw.hwdefs.DspUnit objects
-        """
-        dsp = list()
-        if summation:
-            param.sum_start_word_no = 0
-            param.num_words_to_sum = CaptureParam.MAX_SUM_SECTION_LEN
-            param.complex_window_coefs = list(self._window_coefs[mux])
-            dsp.append(DspUnit.COMPLEX_WINDOW)
-            dsp.append(DspUnit.SUM)
-        else:
-            pass
-        return dsp
-
-    def terminate_acquisition(self, unit_ids):
-        self._cap_ctrl.terminate_capture_units(*unit_ids)
-
-    def download_waveform(self, muxchs):
-        """
-        Download captured waveforms (datapoints)
-
-        Transfer datapoints from FPGA to a host computer.
-
-        Args:
-            muxchs : List[int]
-                A list of the readout mux channels for transfer.
-        Returns:
-            datapoints: *2c
-                Two-dimensional complex data matrix. The row corrsponds to the
-                readout mux channel and the column of the matrix is time dimention
-                of datapoints.
-        """
-
-        vault = []
-        for mux in muxchs:
-            data = self.download_single_waveform(mux)
-            vault.append(data)
-        return np.vstack(vault)
-
-    def download_single_waveform(self, muxch):
-        capture_unit = self._cap_unit[muxch]
-
-        n_of_samples = self._cap_ctrl.num_captured_samples(capture_unit)
-        iq_tuple_data = self._cap_ctrl.get_capture_data(capture_unit, n_of_samples)
-
-        return np.array([(_i + 1j * _q) for _i, _q in iq_tuple_data]).astype(complex)
-
-    def set_trigger_board(self, trigger_board, enabled_capture_units):
-        self._cap_ctrl.select_trigger_awg(self._cap_mod_id, trigger_board)
-        self._cap_ctrl.enable_start_trigger(*enabled_capture_units)
-
-    def set_adc_coarse_frequency(self, freq_in_mhz):
-        self._css.set_adc_cnco(self._group, self._rline, 1e6 * freq_in_mhz)
-        self._rx_coarse_frequency = freq_in_mhz  # DEBUG seems not used right now
+    def set_adc_coarse_frequency(self, freq):
+        self.box_conn.box_unsafe.config_port(self.port_in, cnco_freq=freq)
 
     def get_adc_coarse_frequency(self):
-        # FIXME: あとで直す。とりあえずrを固定で入れる
-        return self._css.get_adc_cnco(self._group, "r") / 1e6
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_in)
+        return dumped["cnco_freq"]
 
-    def static_check_adc_coarse_frequency(self, freq_in_mhz):
+    def static_check_adc_coarse_frequency(self, freq):
         resolution = QSConstants.ADC_CNCO_RESOL
+        freq_in_mhz = freq / 1_000_000
         return self.static_check_value(freq_in_mhz, resolution)
-
-    def static_check_mux_channel_range(self, mux):
-        return True if 0 <= mux and mux < QSConstants.ACQ_MULP else False
 
     def static_check_acquisition_windows(self, list_of_windows):
         def check_value(w):
             return False if 0 != w % QSConstants.ACQ_CAPW_RESOL else True
 
         def check_duration(start, end):
-            return False if start > end or end - start > QSConstants.ACQ_MAXWINDOW else True
+            return (
+                False
+                if start > end or end - start > QSConstants.ACQ_MAXWINDOW
+                else True
+            )
 
         if 0 != list_of_windows[0][0] % QSConstants.ACQ_CAST_RESOL:
             return False
@@ -578,3 +474,9 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
         if resp:
             resp = 1.0 > np.max(np.abs(coeffs))
         return resp
+
+
+class QuBE_FogiPort(QuBE_ControlPort): ...
+
+
+class QuBE_PumpPort(QuBE_ControlPort): ...

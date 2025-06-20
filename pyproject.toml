@@ -6,10 +6,10 @@ readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
     "deprecated>=1.2.18",
-    "e7awgsw",
+    "e7awghal",
+    "pydantic>=2.4.2",
     "pylabrad>=0.98.2",
-    "quel-clock-master",
-    "quel-ic-config",
+    "quel_ic_config",
 ]
 
 [project.scripts]
@@ -22,15 +22,14 @@ build-backend = "hatchling.build"
 [dependency-groups]
 dev = [
     "pytest>=8.4.0",
+    "pytest-twisted>=1.14.3",
     "ruff>=0.11.13",
 ]
 
 [tool.uv.sources]
-quel-clock-master = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_clock_master", rev = "maintenance/0.8.x" }
-e7awgsw = { path = ".prebuilt/dependency_pkgs/simplemulti_standard/e7awgsw-1.0.0-py3-none-any.whl" }
-quel-ic-config = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_ic_config", rev = "maintenance/0.8.x" }
+quel_ic_config = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "quel_ic_config", rev = "main" }
+e7awghal = { git = "https://github.com/quel-inc/quelware.git", subdirectory = "e7awghal", rev = "main" }
 
 [tool.ruff]
-line-length = 140
 target-version = "py39"
 

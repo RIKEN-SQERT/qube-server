@@ -1,34 +1,17 @@
-# Copyright (C) 2022 Yutaka Tabuchi
-
-import argparse
-import sys
-
 import labrad
 import numpy as np
 from labrad import types as T
-from labrad import util
 from labrad.units import ns, us
 
-# from plotly import graph_objects as go
-from .constants import QSConstants
-
-# from manager import QuBE_Manager_Server
-# from .helper import QuBE_Server_debug_otasuke
-from .server import QuBE_Server
+from qube_server.constants import QSConstants
 
 
-############################################################
-#
-# USAGE and for my debugging
-#
-#  > import QubeServer
-#  > QubeServer.usage()
-#
-def usage():
+def main():
     cxn = labrad.connect()
     qs = cxn.qube_server
 
     devices = ["qube010-readout_cd", "qube010-control_5", "qube011-control_6"]
+    devices = ["box167-in00-out01"]
     # Common settings
     Twaveform = 80 * 0.128  # = 10.24            # micro-seconds
     nsample = int(Twaveform * QSConstants.DACBB_SAMPLE_R + 0.5)
@@ -42,13 +25,8 @@ def usage():
     data = np.exp(
         1j * 2 * np.pi * (freq / QSConstants.DACBB_SAMPLE_R) * np.arange(nsample)
     ) * (1 - 1e-3)
-    # This set spositive frequency shift
-    # of {freq} MHz for upper sideband modu-
-    # lation. For control, we use lower-
-    # side band modulation and it sets
-    # {-freq} MHz baseband frequency
-
-    # for pulse operation, try:
+    # This set spositive frequency shift of {freq} MHz for upper sideband modulation.
+    # For control, we use lower-sideband modulation and it sets {-freq} MHz baseband frequency for pulse operation, try:
     #   data[0:2560]=0.0+1j*0.0
 
     qs.select_device(devices[0])  # Readout daq=dac/adc
@@ -78,8 +56,8 @@ def usage():
         (2224 * ns, (2224 + 1024) * ns),
     ]
     qs.acquisition_window(mux_chan, readout_window)
-    qs.debug_auto_acquisition_fir_coefficients(mux_chan, T.Value(freq, "MHz"))
-    qs.debug_auto_acquisition_window_coefficients(mux_chan, T.Value(freq, "MHz"))
+    # imai: qs.debug_auto_acquisition_fir_coefficients(mux_chan, T.Value(freq, "MHz"))
+    # imai: qs.debug_auto_acquisition_window_coefficients(mux_chan, T.Value(freq, "MHz"))
     qs.acquisition_mode(mux_chan, "2")
     mux_channels.append(mux_chan)
 
@@ -98,8 +76,8 @@ def usage():
     #  readout_window.append(( (6*i+4)*dT, (6*i+6)*dT))
     qs.acquisition_window(mux_chan, readout_window)
     qs.acquisition_mode(mux_chan, "2")
-    qs.debug_auto_acquisition_fir_coefficients(mux_chan, T.Value(freq, "MHz"))
-    qs.debug_auto_acquisition_window_coefficients(mux_chan, T.Value(freq, "MHz"))
+    # imai: qs.debug_auto_acquisition_fir_coefficients(mux_chan, T.Value(freq, "MHz"))
+    # imai: qs.debug_auto_acquisition_window_coefficients(mux_chan, T.Value(freq, "MHz"))
     # mux_channels.append(mux_chan)                            # DEBUG: Intensionally off
     qs.upload_readout_parameters(mux_channels)
 
@@ -141,6 +119,7 @@ def usage():
     qs.select_device(devices[0])
     mux_chan = 0
     dat = qs.download_waveform([mux_chan])
+    print(dat)
     cxn.disconnect()
 
     # data_view = False
@@ -173,46 +152,6 @@ def usage():
     #     fig = go.Figure(graph_data)
     #     fig.write_html("1.html")
     return dat
-
-
-############################################################
-#
-# SERVER WORKER
-#
-# In bash, to start QuBE Server w/o debuggin mode
-#   $ QUBE_SERVER = 'QuBE Server' python3 QubeServer.py
-#
-# To start Qube Manager,
-#   $ QUBE_SERVER = 'QuBE Manager' python3 QubeServer.py
-#
-# Otherwise, QuBE Server starts in debugging mode.
-#
-
-
-def main():
-    parser = argparse.ArgumentParser(description="QuBE Server", add_help=False)
-
-    parser.add_argument(
-        "--links", default=None, help="Path to the JSON file containing links data."
-    )
-
-    parser.add_argument(
-        "--skew", default=None, help="Path to the JSON file containing skew data."
-    )
-
-    args, unknown = parser.parse_known_args()
-    sys.argv = [sys.argv[0]] + unknown
-
-    links_json_path = args.links
-    skew_json_path = args.skew
-
-    __server__ = QuBE_Server(
-        possible_links_json_filepath=links_json_path,
-        chassis_skew_json_filepath=skew_json_path,
-    )
-
-    print("new qube server start.")
-    util.runServer(__server__)
 
 
 if __name__ == "__main__":

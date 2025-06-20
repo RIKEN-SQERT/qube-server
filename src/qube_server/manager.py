@@ -47,11 +47,18 @@ class QuBE_Manager_Device(DeviceWrapper):
     @inlineCallbacks
     def initialize(self):  # @inlineCallbacks
         yield self._lsi_ctrl.do_init(rf_type=self._role, message_out=self.verbose)
-        mixer_init = [(ch[QSConstants.CNL_MIXCH_TAG], ch[QSConstants.CNL_MIXSB_TAG]) for ch in self._channel_info]
+        mixer_init = [
+            (ch[QSConstants.CNL_MIXCH_TAG], ch[QSConstants.CNL_MIXSB_TAG])
+            for ch in self._channel_info
+        ]
 
         for ch, usb_lsb in mixer_init:  # Upper or lower sideband configuration
-            if usb_lsb == QSConstants.CNL_MXUSB_VAL:  # in the active IQ mixer. The output
-                yield self._lsi_ctrl.adrf6780[ch].set_usb()  # become small with a wrong sideband
+            if (
+                usb_lsb == QSConstants.CNL_MXUSB_VAL
+            ):  # in the active IQ mixer. The output
+                yield self._lsi_ctrl.adrf6780[
+                    ch
+                ].set_usb()  # become small with a wrong sideband
             elif usb_lsb == QSConstants.CNL_MXLSB_VAL:  # setting.
                 yield self._lsi_ctrl.adrf6780[ch].set_lsb()
 
@@ -129,7 +136,9 @@ class QuBE_Manager_Server(DeviceServer):
             self.master_link = yield reg.get(QSConstants.REGMASTERLNK)
             self.adi_api_path = yield reg.get(REGAPIPATH)
 
-            self._master_ctrl = yield QuBEMasterClient(self.master_link, receiver_limit_by_bind=True)
+            self._master_ctrl = yield QuBEMasterClient(
+                self.master_link, receiver_limit_by_bind=True
+            )
             self.__is_clock_opened = True
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
@@ -174,7 +183,9 @@ class QuBE_Manager_Server(DeviceServer):
         returnValue(found)
 
     @inlineCallbacks
-    def instantiateQube(self, name, role, iplsi, ipclk, channel_info):  # @inlineCallbacks
+    def instantiateQube(
+        self, name, role, iplsi, ipclk, channel_info
+    ):  # @inlineCallbacks
         lsi_ctrl = yield qubelsi.qube.Qube(iplsi, self.adi_api_path)
         sync_ctrl = yield SequencerClient(ipclk, receiver_limit_by_bind=True)
         args = (name, role)
@@ -281,7 +292,9 @@ class QuBE_Manager_Server(DeviceServer):
         if self.__is_clock_opened:
             del self._master_ctrl
 
-        self._master_ctrl = QuBEMasterClient(self.master_link, receiver_limit_by_bind=True)
+        self._master_ctrl = QuBEMasterClient(
+            self.master_link, receiver_limit_by_bind=True
+        )
         self.__is_clock_opened = True
 
         return True

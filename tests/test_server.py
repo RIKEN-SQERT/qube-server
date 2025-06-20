@@ -1,24 +1,45 @@
 import copy
 import random
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock, Mock, create_autospec
 
 import pytest
 from labrad import types as T
-from labrad.devices import DeviceWrapper
+from labrad.devices import DeviceServer, DeviceWrapper
 from labrad.util import ContextDict
 
+from qube_server.box_connection import BoxConnection
 from qube_server.constants import QSConstants
+from qube_server.devices import DeviceType, QuBE_ControlPort, QuBE_ReadoutPort
 from qube_server.server import QuBE_Server
 
 
 @pytest.fixture
-def fake_devices() -> list[DeviceWrapper]:
-    dev0 = DeviceWrapper(guid=0, name="device_00")
-    dev0.chassis_name = "TestA"  # type: ignore
-    dev1 = DeviceWrapper(guid=1, name="device_01")
-    dev1.chassis_name = "TestA"  # type: ignore
-    dev2 = DeviceWrapper(guid=2, name="device_02")
-    dev2.chassis_name = "TestB"  # type: ignore
+def fake_box_connections() -> list[BoxConnection]:
+    box_conn_a = create_autospec(BoxConnection)
+    box_conn_a.box_name = "BoxA"
+    box_conn_b = create_autospec(BoxConnection)
+    box_conn_b.box_name = "BoxB"
+    return [box_conn_a, box_conn_b]
+
+
+@pytest.fixture
+def fake_devices(fake_box_connections) -> list[DeviceWrapper]:
+    box_conn_a, box_conn_b = fake_box_connections
+    dev0 = create_autospec(QuBE_ReadoutPort)
+    dev0.box_conn = box_conn_a
+    dev0.guid = 0
+    dev0.name = "device_00"
+    dev0.device_type = DeviceType.readout
+    dev1 = create_autospec(QuBE_ControlPort)
+    dev1.box_conn = box_conn_a
+    dev1.guid = 2
+    dev1.name = "device_01"
+    dev1.device_type = DeviceType.ctrl
+    dev2 = create_autospec(QuBE_ControlPort)
+    dev2.box_conn = box_conn_b
+    dev2.guid = 4
+    dev2.name = "device_02"
+    dev2.device_type = DeviceType.ctrl
     return [dev0, dev1, dev2]
 
 
@@ -33,19 +54,22 @@ def _get_dummy_registry():
 
 
 @pytest.fixture
-def qube_server_with_fake_devices(qube_server, fake_devices) -> QuBE_Server:
-    for dev in fake_devices:
-        qube_server.devices[dev.guid, dev.name] = dev
-    return qube_server
+def qube_server():
+    server = QuBE_Server()
+    server.log = MagicMock()
+    server._get_registry_service = _get_dummy_registry  # type: ignore
+    DeviceServer.initServer(server)
+    return server
 
 
 @pytest.fixture
-def qube_server() -> QuBE_Server:
-    server = QuBE_Server()
-    server.log = MagicMock()
-    server._get_registry_service = _get_dummy_registry
-    server.initServer()
-    return server
+def qube_server_with_fake_devices(
+    qube_server, fake_devices, fake_box_connections
+) -> QuBE_Server:
+    qube_server._name_to_box_conn = {bc.box_name: bc for bc in fake_box_connections}
+    for dev in fake_devices:
+        qube_server.devices[dev.guid, dev.name] = dev
+    return qube_server
 
 
 @pytest.fixture
@@ -55,7 +79,9 @@ def context() -> ContextDict:
     return context
 
 
-def test_number_of_shots(fake_devices, qube_server_with_fake_devices: QuBE_Server, context):
+def test_number_of_shots(
+    fake_devices, qube_server_with_fake_devices: QuBE_Server, context
+):
     expected_list = []
     # setter
     for dev in fake_devices:
@@ -72,7 +98,9 @@ def test_number_of_shots(fake_devices, qube_server_with_fake_devices: QuBE_Serve
         assert actual_shots == expected_shots
 
 
-def test_repetition_time(fake_devices, qube_server_with_fake_devices: QuBE_Server, context):
+def test_repetition_time(
+    fake_devices, qube_server_with_fake_devices: QuBE_Server, context
+):
     expected_list = []
     # setter
     for dev in fake_devices:
@@ -96,7 +124,9 @@ def test_repetition_time(fake_devices, qube_server_with_fake_devices: QuBE_Serve
         assert actual["ns"] == expected_reptime
 
 
-def test_sequence_length(fake_devices, qube_server_with_fake_devices: QuBE_Server, context):
+def test_sequence_length(
+    fake_devices, qube_server_with_fake_devices: QuBE_Server, context
+):
     expected_list = []
     # setter
     for dev in fake_devices:
@@ -120,75 +150,114 @@ def test_sequence_length(fake_devices, qube_server_with_fake_devices: QuBE_Serve
         assert actual["ns"] == expected_length
 
 
-def test_daq_start(fake_devices, qube_server_with_fake_devices: QuBE_Server, context):
-    server = qube_server_with_fake_devices
-    for d in fake_devices:
-        d.set_trigger_board = MagicMock()
-    dev_ro, dev_ri, _ = fake_devices
-
-    context[QSConstants.DAC_CNXT_TAG] = {
-        dev_ro.chassis_name: (dev_ro, {2, 3, 4}),
-    }
-
-    context[QSConstants.ACQ_CNXT_TAG] = {
-        dev_ri.chassis_name: [
-            (dev_ri, 1, [0, 1]),
-        ],
-    }
-
-    dev_ro.device_role = QSConstants.CNL_READ_VAL
-    server.select_device(context, dev_ro.name)
-    server.daq_start(context)
-
-    dev_ri.set_trigger_board.assert_called_once_with(2, [0, 1])
-
-
-def test_daq_trigger(qube_server_with_fake_devices: QuBE_Server, context, fake_devices):
+def test_daq_trigger_when_little_margin_from_last(
+    qube_server_with_fake_devices: QuBE_Server,
+    fake_box_connections,
+    context,
+    fake_devices,
+):
     server = qube_server_with_fake_devices
     dev_A, _, dev_B = fake_devices
+    box_conn_a, box_conn_b = fake_box_connections
 
-    _mock_seq_client_A = MagicMock()
-    _mock_seq_client_A.read_clock.return_value = (True, 10000)
-    _mock_seq_client_B = MagicMock()
-    server._sync_ctrl = {"TestA": _mock_seq_client_A, "TestB": _mock_seq_client_B}
-    server.chassisSkew = {"TestA": 10, "TestB": 20}
+    server.initContext(context)
+
     context[QSConstants.DAQ_SDLY_TAG] = 2  # sec
 
-    context[QSConstants.DAC_CNXT_TAG] = {
-        "TestA": (dev_A, {0, 2, 3}),
-        "TestB": (dev_B, {1, 2}),
+    context[QSConstants.ACQ_CNXT_TAG] = {
+        box_conn_a.box_name: {(4, 0)},
+        box_conn_b.box_name: {(5, 1)},
     }
+
+    context[QSConstants.DAC_CNXT_TAG] = {
+        box_conn_a.box_name: {(0, 0), (2, 0), (3, 2)},
+        box_conn_b.box_name: {(1, 0), (2, 1)},
+    }
+    latest_time_counter = 0b000100
+    box_conn_a.last_trigger_timecounter = 0b010100
+    box_conn_a.timecounter_offset = 0b0100
+    box_conn_a.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_a.get_latest_sysref_timecounter.return_value = latest_time_counter
+    box_conn_b.last_trigger_timecounter = 0b111100
+    box_conn_b.timecounter_offset = 0b1100
+    box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_b.get_latest_sysref_timecounter.return_value = latest_time_counter
 
     result = server.daq_trigger(context)
     assert result is True
 
-    expected_common_clock = (10000 + int(2 * QSConstants.SYNC_CLOCK + 0.5)) & 0xFFFFFFFFF0
-    _mock_seq_client_A.add_sequencer.assert_called_once_with(expected_common_clock + 10, 0b1101)
-    _mock_seq_client_B.add_sequencer.assert_called_once_with(expected_common_clock + 20, 0b0110)
+    expected_common_clock = (
+        0b110000 + int(2 * QSConstants.SYNC_CLOCK + 0.5)
+    ) & 0xFFFFFFFFF0
+    box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
+        context.ID,
+        runits={(4, 0)},
+        channels={(0, 0), (2, 0), (3, 2)},
+        timecounter=expected_common_clock + 0b0100,
+    )
+    box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
+        context.ID,
+        runits={(5, 1)},
+        channels={(1, 0), (2, 1)},
+        timecounter=expected_common_clock + 0b1100,
+    )
+
+
+def test_daq_trigger_when_large_margin_from_last(
+    qube_server_with_fake_devices: QuBE_Server,
+    fake_box_connections,
+    context,
+    fake_devices,
+):
+    server = qube_server_with_fake_devices
+    dev_A, _, dev_B = fake_devices
+    box_conn_a, box_conn_b = fake_box_connections
+
+    server.initContext(context)
+
+    context[QSConstants.DAQ_SDLY_TAG] = 2  # sec
+
+    context[QSConstants.ACQ_CNXT_TAG] = {
+        box_conn_a.box_name: {(4, 0)},
+        box_conn_b.box_name: {(5, 1)},
+    }
+
+    context[QSConstants.DAC_CNXT_TAG] = {
+        box_conn_a.box_name: {(0, 0), (2, 0), (3, 2)},
+        box_conn_b.box_name: {(1, 0), (2, 1)},
+    }
+    latest_time_counter = 0b1_000000
+    box_conn_a.last_trigger_timecounter = 0b010100
+    box_conn_a.timecounter_offset = 0b0100
+    box_conn_a.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_a.get_latest_sysref_timecounter.return_value = latest_time_counter
+    box_conn_b.last_trigger_timecounter = 0b111100
+    box_conn_b.timecounter_offset = 0b1100
+    box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_b.get_latest_sysref_timecounter.return_value = latest_time_counter
+
+    result = server.daq_trigger(context)
+    assert result is True
+
+    expected_common_clock = (
+        0b1_000000 + int(2 * QSConstants.SYNC_CLOCK + 0.5)
+    ) & 0xFFFFFFFFF0
+    box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
+        context.ID,
+        runits={(4, 0)},
+        channels={(0, 0), (2, 0), (3, 2)},
+        timecounter=expected_common_clock + 0b0100,
+    )
+    box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
+        context.ID,
+        runits={(5, 1)},
+        channels={(1, 0), (2, 1)},
+        timecounter=expected_common_clock + 0b1100,
+    )
 
 
 def test_daq_stop(qube_server_with_fake_devices: QuBE_Server):
     qube_server_with_fake_devices.daq_stop  # confirms the method exists
-
-
-def test_daq_terminate(qube_server_with_fake_devices: QuBE_Server, context, fake_devices):
-    server = qube_server_with_fake_devices
-    dev_dac, dev_acq, _ = fake_devices
-    dev_dac.terminate_daq = Mock()
-    dev_acq.terminate_acquisition = Mock()
-
-    context[QSConstants.DAC_CNXT_TAG] = {
-        dev_dac.chassis_name: (dev_dac, {2, 3, 4}),
-    }
-    context[QSConstants.ACQ_CNXT_TAG] = {
-        dev_acq.chassis_name: [
-            (dev_acq, 1, [0, 1]),
-        ],
-    }
-
-    server.daq_terminate(context)
-    dev_dac.terminate_daq.assert_called_once_with([2, 3, 4])
-    dev_acq.terminate_acquisition.assert_called_once_with([0, 1])
 
 
 def test_timeout(qube_server: QuBE_Server, context):
@@ -217,13 +286,19 @@ def test_daq_channel(qube_server_with_fake_devices: QuBE_Server, fake_devices, c
     assert server.daq_channels(context) == 5
 
 
-def test_upload_parameter(qube_server_with_fake_devices: QuBE_Server, fake_devices, context): ...
+def test_upload_parameter(
+    qube_server_with_fake_devices: QuBE_Server, fake_devices, context
+): ...
 
 
-def test_upload_readout_parameter(qube_server_with_fake_devices: QuBE_Server, fake_devices, context): ...
+def test_upload_readout_parameter(
+    qube_server_with_fake_devices: QuBE_Server, fake_devices, context
+): ...
 
 
-def test_upload_waveform(qube_server_with_fake_devices: QuBE_Server, fake_devices, context):
+def test_upload_waveform(
+    qube_server_with_fake_devices: QuBE_Server, fake_devices, context
+):
     server = qube_server_with_fake_devices
     dev1, _, _ = fake_devices
 
@@ -233,27 +308,12 @@ def test_upload_waveform(qube_server_with_fake_devices: QuBE_Server, fake_device
     dev1.check_awg_channels = Mock(return_value=True)
     dev1.check_waveform = Mock(return_value=(True, len(channels), len(wavedata[0])))
     dev1.upload_waveform = Mock()
+    dev1.channels_of_port = {0, 1, 2}
 
     server.select_device(context, dev1.name)
     server.upload_waveform(context, wavedata, channels)
 
-    dev1.upload_waveform.assert_called_once()
-
-
-def test_download_waveform(qube_server_with_fake_devices: QuBE_Server, fake_devices, context):
-    server = qube_server_with_fake_devices
-    dev1, _, _ = fake_devices
-    dev1.device_role = QSConstants.CNL_READ_VAL
-
-    muxchs = [0, 1]
-
-    dev1.static_check_mux_channel_range = Mock(return_value=True)
-    dev1.download_waveform = Mock()
-
-    server.select_device(context, dev1.name)
-    server.download_waveform(context, muxchs)
-
-    dev1.download_waveform.assert_called_once()
+    dev1.upload_waveform.assert_called()
 
 
 def test_frequency_local(qube_server_with_fake_devices, fake_devices, context):
@@ -268,10 +328,10 @@ def test_frequency_local(qube_server_with_fake_devices, fake_devices, context):
     freq_val = T.Value(10000, "MHz")
     dev.static_check_lo_frequency.return_value = True
     server.frequency_local(context, freq_val)
-    dev.set_lo_frequency.assert_called_once_with(10000)
+    dev.set_lo_frequency.assert_called_once_with(10_000_000_000)
 
     # getter
-    dev.get_lo_frequency.return_value = 11000
+    dev.get_lo_frequency.return_value = 11_000_000_000
     actual = server.frequency_local(context)
     assert actual["MHz"] == 11000
 
@@ -286,10 +346,10 @@ def test_frequency_tx_nco(qube_server_with_fake_devices, fake_devices, context):
     # setter
     freq_val = T.Value(500, "MHz")
     server.frequency_tx_nco(context, freq_val)
-    dev.set_dac_coarse_frequency.assert_called_once_with(500)
+    dev.set_dac_coarse_frequency.assert_called_once_with(500_000_000)
 
     # getter
-    dev.get_dac_coarse_frequency.return_value = -500
+    dev.get_dac_coarse_frequency.return_value = -500_000_000
     actual = server.frequency_tx_nco(context)
     assert actual["MHz"] == -500
 
@@ -306,14 +366,16 @@ def test_frequency_tx_fine_nco(qube_server_with_fake_devices, fake_devices, cont
     channel = 1
     freq_val = T.Value(100.5, "MHz")
 
+    dev.channels_of_port = {0, 1, 2}
+
     # setter
     dev.check_awg_channels.return_value = True
     dev.static_check_dac_fine_frequency.return_value = True
     server.frequency_tx_fine_nco(context, channel, freq_val)
-    dev.set_dac_fine_frequency.assert_called_once_with(channel, 100.5)
+    dev.set_dac_fine_frequency.assert_called_once_with(channel, 100_500_000)
 
     # getter
-    dev.get_dac_fine_frequency.return_value = -100.5
+    dev.get_dac_fine_frequency.return_value = -100_500_000
     actual = server.frequency_tx_fine_nco(context, channel)
     assert actual["MHz"] == -100.5
     dev.get_dac_fine_frequency.assert_called_with(channel)
@@ -330,10 +392,10 @@ def test_coarse_rx_nco_frequency(qube_server_with_fake_devices, fake_devices, co
     dev.device_role = QSConstants.CNL_READ_VAL
     freq_val = T.Value(200, "MHz")
     server.coarse_rx_nco_frequency(context, freq_val)
-    dev.set_adc_coarse_frequency.assert_called_once_with(200)
+    dev.set_adc_coarse_frequency.assert_called_once_with(200_000_000)
 
     # getter
-    dev.get_adc_coarse_frequency.return_value = -200
+    dev.get_adc_coarse_frequency.return_value = -200_000_000
     actual = server.coarse_rx_nco_frequency(context)
     assert actual["MHz"] == -200
 
