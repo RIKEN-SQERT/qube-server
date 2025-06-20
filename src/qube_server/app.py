@@ -185,19 +185,7 @@ def usage():
 # Otherwise, QuBE Server starts in debugging mode.
 #
 
-try:
-    server_select = os.environ[QSConstants.ENV_SRVSEL]
-    # if server_select == QSConstants.MNRNAME:
-    #     __server__ = QuBE_Manager_Server()
-    if server_select == QSConstants.SRVNAME:
-        __server__ = QuBE_Server()
-    else:
-        server_select = None
-except KeyError:
-    server_select = None
-
-if server_select is None:
-    __server__ = QuBE_Server_debug_otasuke()
+__server__ = QuBE_Server()
 
 
 def main():
