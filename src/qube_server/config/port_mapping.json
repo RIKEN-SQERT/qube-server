@@ -1,0 +1,309 @@
+{
+    "quel1se-riken8": {
+        "(0, 0)": {
+            "port": 1,
+            "role": "readout"
+        },
+        "(0, 1)": {
+            "port": 1,
+            "role": "control",
+            "subport": 1
+        },
+        "(0, 2)": {
+            "port": 2,
+            "role": "pump"
+        },
+        "(0, 3)": {
+            "port": 3,
+            "role": "control"
+        },
+        "(1, 0)": {
+            "port": 6,
+            "role": "control"
+        },
+        "(1, 1)": {
+            "port": 7,
+            "role": "control"
+        },
+        "(1, 2)": {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 3)": {
+            "port": 9,
+            "role": "control"
+        },
+        "(0, r)" : {
+            "port": 0,
+            "role": "readin"
+        },
+        "(0, m)" : {
+            "port": 4,
+            "role": "monitor"
+        },
+        "(1, m)" : {
+            "port": 10,
+            "role": "monitor"
+        }
+    },
+    "quel1-a" : {
+        "(0, 0)" : {
+            "port": 1,
+            "role": "readout"
+        },
+        "(0, 1)" : {
+            "port": 3,
+            "role": "pump"
+        },
+        "(0, 2)" : {
+            "port": 2,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 4,
+            "role": "control"
+        },
+        "(1, 0)" : {
+            "port": 8,
+            "role": "readout"
+        },
+        "(1, 1)" : {
+            "port": 10,
+            "role": "pump"
+        },
+        "(1, 2)" : {
+            "port": 11,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 9,
+            "role": "control"
+        },
+        "(0, r)" : {
+            "port": 0,
+            "role": "readin"
+        },
+        "(1, r)" : {
+            "port": 7,
+            "role": "readin"
+        },
+        "(0, m)" : {
+            "port": 5,
+            "role": "monitor"
+        },
+        "(1, m)" : {
+            "port": 12,
+            "role": "monitor"
+        }
+    },
+    "quel1-b" : {
+        "(0, 0)" : {
+            "port": 1,
+            "role": "control"
+        },
+        "(0, 1)" : {
+            "port": 2,
+            "role": "control"
+        },
+        "(0, 2)" : {
+            "port": 3,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 4,
+            "role": "control"
+        },
+        "(1, 0)" : {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 1)" : {
+            "port": 9,
+            "role": "control"
+        },
+        "(1, 2)" : {
+            "port": 10,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 11,
+            "role": "control"
+        },
+        "(0, m)" : {
+            "port": 5,
+            "role": "monitor"
+        },
+        "(1, m)" : {
+            "port": 12,
+            "role": "monitor"
+        }
+    },
+    "qube-ou-a" : {
+        "(0, 0)" : {
+            "port": 0,
+            "role": "readout"
+        },
+        "(0, 1)" : {
+            "port": 2,
+            "role": "pump"
+        },
+        "(0, 2)" : {
+            "port": 5,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 6,
+            "role": "control"
+        },
+        "(1, 0)" : {
+            "port": 13,
+            "role": "readout"
+        },
+        "(1, 1)" : {
+            "port": 11,
+            "role": "pump"
+        },
+        "(1, 2)" : {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 7,
+            "role": "control"
+        },
+        "(0, r)" : {
+            "port": 1,
+            "role": "readin"
+        },
+        "(1, r)" : {
+            "port": 12,
+            "role": "readin"
+        }
+    },
+    "qube-ou-b": {
+        "(0, 0)" : {
+            "port": 0,
+            "role": "control"
+        },
+        "(0, 1)" : {
+            "port": 2,
+            "role": "control"
+        },
+        "(0, 2)" : {
+            "port": 5,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 6,
+            "role": "control"
+            },
+        "(1, 0)" : {
+            "port": 13,
+            "role": "control"
+        },
+        "(1, 1)" : {
+            "port": 11,
+            "role": "control"
+            },
+        "(1, 2)" : {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 7,
+            "role": "control"
+        }
+    },
+    "qube-riken-a" : {
+        "(0, 0)" : {
+            "port": 0,
+            "role": "readout"
+        },
+        "(0, 1)" : {
+            "port": 2,
+            "role": "pump"
+        },
+        "(0, 2)" : {
+            "port": 5,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 6,
+            "role": "control"
+        },
+        "(1, 0)" : {
+            "port": 13,
+            "role": "readout"
+        },
+        "(1, 1)" : {
+            "port": 11,
+            "role": "pump"
+        },
+        "(1, 2)" : {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 7,
+            "role": "control"
+        },
+        "(0, r)" : {
+            "port": 1,
+            "role": "readin"
+        },
+        "(1, r)" : {
+            "port": 12,
+            "role": "readin"
+        },
+        "(0, m)" : {
+            "port": 4,
+            "role": "monitor"
+        },
+        "(1, m)" : {
+            "port": 9,
+            "role": "monitor"
+        }
+    },
+    "qube-riken-b": {
+        "(0, 0)" : {
+            "port": 0,
+            "role": "control"
+        },
+        "(0, 1)" : {
+            "port": 2,
+            "role": "control"
+        },
+        "(0, 2)" : {
+            "port": 5,
+            "role": "control"
+        },
+        "(0, 3)" : {
+            "port": 6,
+            "role": "control"
+            },
+        "(1, 0)" : {
+            "port": 13,
+            "role": "control"
+        },
+        "(1, 1)" : {
+            "port": 11,
+            "role": "control"
+            },
+        "(1, 2)" : {
+            "port": 8,
+            "role": "control"
+        },
+        "(1, 3)" : {
+            "port": 7,
+            "role": "control"
+        },
+        "(0, m)" : {
+            "port": 4,
+            "role": "monitor"
+        },
+        "(1, m)" : {
+            "port": 9,
+            "role": "monitor"
+        }
+    }
+}

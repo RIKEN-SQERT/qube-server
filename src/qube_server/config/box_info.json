@@ -1,0 +1,104 @@
+{
+    "quel1se-3-01": {
+        "id": "quel1se-3-01",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.87",
+        "comment": ""
+    },
+    "quel1se-3-02": {
+        "id": "quel1se-3-02",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.89",
+        "comment": ""
+    },
+    "quel1se-3-03": {
+        "id": "quel1se-3-03",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.111",
+        "comment": ""
+    },
+    "quel1se-3-04": {
+        "id": "quel1se-3-04",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.115",
+        "comment": ""
+    },
+    "quel1se-3-05": {
+        "id": "quel1se-3-05",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.139",
+        "comment": ""
+    },
+    "quel1se-3-06": {
+        "id": "quel1se-3-06",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.140",
+        "comment": ""
+    },
+    "quel1se-3-07": {
+        "id": "quel1se-3-07",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.141",
+        "comment": ""
+    },
+    "quel1se-3-08": {
+        "id": "quel1se-3-08",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.142",
+        "comment": ""
+    },
+    "quel1se-3-09": {
+        "id": "quel1se-3-09",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.143",
+        "comment": ""
+    },
+    "quel1se-3-10": {
+        "id": "quel1se-3-10",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.145",
+        "comment": ""
+    },
+    "quel1se-3-11": {
+        "id": "quel1se-3-11",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.147",
+        "comment": ""
+    },
+    "quel1se-3-12": {
+        "id": "quel1se-3-12",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.148",
+        "comment": ""
+    },
+    "quel1se-3-13": {
+        "id": "quel1se-3-13",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.149",
+        "comment": ""
+    },
+    "quel1se-3-14": {
+        "id": "quel1se-3-14",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.151",
+        "comment": ""
+    },
+    "quel1se-3-15": {
+        "id": "quel1se-3-15",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.153",
+        "comment": ""
+    },
+    "quel1se-3-16": {
+        "id": "quel1se-3-16",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.155",
+        "comment": ""
+    },
+    "quel1se-3-17": {
+        "id": "quel1se-3-17",
+        "type": "quel1se-riken8",
+        "ip": "10.*.0.156",
+        "comment": ""
+    }
+}
