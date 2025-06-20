@@ -91,7 +91,7 @@ class QuBE_Server(DeviceServer):
     # | 1       | 3     | (1, 3)         | 9     | Ctrl |
 
     def parse_qube_device_id(self, device_id):
-        devicd_id_regexp = re.compile(r"(quel1se-1-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})")
+        devicd_id_regexp = re.compile(r"(quel1se-[0-9]-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})")
         m = devicd_id_regexp.match(device_id)
         if m:
             device_name = m.group(1)
@@ -237,7 +237,6 @@ class QuBE_Server(DeviceServer):
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
             return list()
-
         try:
             devices = self.instantiateChannel(name, channels, awg_ctrl, cap_ctrl, info)
         except Exception as e:
