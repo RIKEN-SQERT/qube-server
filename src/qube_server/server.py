@@ -184,6 +184,11 @@ class QuBE_Server(DeviceServer):
             return False
         return True
 
+    @setting(20, "Device Type", returns=["s"])
+    def device_type(self, c):
+        dev = self.selectedDevice(c)
+        return dev.device_type.name
+
     @setting(100, "Shots", num_shots=["w"], returns=["w"])
     def number_of_shots(self, c, num_shots=None):
         """
