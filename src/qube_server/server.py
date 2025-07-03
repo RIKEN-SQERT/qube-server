@@ -421,7 +421,7 @@ class QuBE_Server(DeviceServer):
                 The number of available AWG channels.
         """
         dev = self.selectedDevice(c)
-        return dev.number_of_awgs
+        return len(dev.channels_of_port)
 
     @setting(200, "Upload Parameters", channels=["w", "*w"], returns=["b"])
     def upload_parameters(self, c, channels):
