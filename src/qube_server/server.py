@@ -359,7 +359,6 @@ class QuBE_Server(DeviceServer):
 
         return dlist
 
-
     @setting(112, "DAQ Clear", returns=["b"])
     def daq_clear(self, c):
         raise NotImplementedError()
