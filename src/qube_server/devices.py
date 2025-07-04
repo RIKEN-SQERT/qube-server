@@ -306,20 +306,10 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         self._acq_mode[mux] = mode
 
     def set_acquisition_fir_coefficient(self, muxch, coeffs):
-        def fircoef_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int)
-
-        self._fir_coefs[muxch] = fircoef_DACify(coeffs)
+        self._fir_coefs[muxch] = coeffs
 
     def set_acquisition_window_coefficient(self, muxch, coeffs):
-        def window_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int)
-
-        self._window_coefs[muxch] = window_DACify(coeffs)
+        self._window_coefs[muxch] = coeffs
 
     def upload_readout_parameters(self, muxch):
         """
@@ -408,9 +398,9 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
 
         if decim:
             # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-            param.realfirs_real_coeff = self._fir_coefs[mux].real
-            param.realfirs_imag_coeff = self._fir_coefs[mux].imag
-            param.realfirs_enable = True
+            param.complexfir_coeff = self._fir_coefs[mux]
+            param.complexfir_exponent_offset = QSConstants.ACQ_FCBIT_EXP_OFFSET
+            param.complexfir_enable = True
             param.decimation_enable = True
         if averg:
             # [Averaging] Averaging datapoints for all experiments.
