@@ -278,12 +278,12 @@ def test_timeout(qube_server: QuBE_Server, context):
 def test_daq_channel(qube_server_with_fake_devices: QuBE_Server, fake_devices, context):
     server = qube_server_with_fake_devices
     dev1, dev2, _ = fake_devices
-    dev1.number_of_awgs = 4
-    dev2.number_of_awgs = 5
+    dev1.channels_of_port = {0, 1, 2}
+    dev2.channels_of_port = {0, 1}
     server.select_device(context, dev1.name)
-    assert server.daq_channels(context) == 4
+    assert server.daq_channels(context) == 3
     server.select_device(context, dev2.name)
-    assert server.daq_channels(context) == 5
+    assert server.daq_channels(context) == 2
 
 
 def test_upload_parameter(
