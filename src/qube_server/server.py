@@ -184,6 +184,11 @@ class QuBE_Server(DeviceServer):
             return False
         return True
 
+    @setting(20, "Device Type", returns=["s"])
+    def device_type(self, c):
+        dev = self.selectedDevice(c)
+        return dev.device_type.name
+
     @setting(100, "Shots", num_shots=["w"], returns=["w"])
     def number_of_shots(self, c, num_shots=None):
         """
@@ -354,7 +359,6 @@ class QuBE_Server(DeviceServer):
 
         return dlist
 
-
     @setting(112, "DAQ Clear", returns=["b"])
     def daq_clear(self, c):
         raise NotImplementedError()
@@ -416,7 +420,7 @@ class QuBE_Server(DeviceServer):
                 The number of available AWG channels.
         """
         dev = self.selectedDevice(c)
-        return dev.number_of_awgs
+        return len(dev.channels_of_port)
 
     @setting(200, "Upload Parameters", channels=["w", "*w"], returns=["b"])
     def upload_parameters(self, c, channels):
