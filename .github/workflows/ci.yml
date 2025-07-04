@@ -24,9 +24,6 @@ jobs:
           : # sudo apt-get update
           sudo apt-get install libcairo2-dev pkg-config python3-dev libgirepository-2.0-dev
 
-      - name: Download prebuilt
-        run: ./download_and_extract_prebuilt.sh
-
       - name: Install the project
         run: uv sync --locked --dev
 
