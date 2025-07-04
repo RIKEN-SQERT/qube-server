@@ -361,13 +361,14 @@ class QuBE_Server(DeviceServer):
 
     @setting(112, "DAQ Clear", returns=["b"])
     def daq_clear(self, c):
-        raise NotImplementedError()
         """
         Clear registed control and readout channels from the device context.
 
         """
         c[QSConstants.DAC_CNXT_TAG] = dict()
         c[QSConstants.ACQ_CNXT_TAG] = dict()
+        c[QSConstants.AWG_TASK_TAG] = dict()
+        c[QSConstants.CAP_TASK_TAG] = dict()
 
         return True  # Nothing to stop
 
