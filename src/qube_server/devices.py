@@ -194,8 +194,9 @@ class QuBE_ControlPort(QuBE_DeviceBase):
 
         awg_param = AwgParam(num_wait_word=0, num_repeat=self.number_of_shots)
         waveform_name = f"{self.name}-{channel}"
+        iq = QSConstants.DAC_BITS_POW_HALF*waveform
         self.box_conn.box_unsafe.register_wavedata(
-            port=self.port_out, channel=channel, name=waveform_name, iq=waveform
+            port=self.port_out, channel=channel, name=waveform_name, iq=iq
         )
         awg_param.chunks.append(
             WaveChunk(
