@@ -414,7 +414,7 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
             # in the readout window.
             # resp = self.configure_readout_summation(mux, param, summn)
             param.sum_enable = True
-            param.sum_range = (0, param.num_section)
+            param.sum_range = (0, (len(self._window_coefs[mux])//4)-1)
             param.window_enable = True
             param.window_coeff = self._window_coefs[mux]
 
