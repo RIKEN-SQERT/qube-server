@@ -316,7 +316,7 @@ class QuBE_Server(DeviceServer):
             )
 
         # the first box is used as a tentative master
-        cur_timecounter = box_conns[0].get_latest_sysref_timecounter()
+        cur_timecounter = int(box_conns[0].box_unsafe.get_current_timecounter())
         latest_trigger_timecounter = max(
             bc.last_trigger_timecounter - bc.timecounter_offset for bc in box_conns
         )
@@ -450,7 +450,7 @@ class QuBE_Server(DeviceServer):
         """
         Register selected DAC AWG channels
 
-        The method [_register_awg_channels()] register the enabled AWG IDs tothe device context.
+        The method [_register_awg_channels()] register the enabled AWG IDs to the device context.
         This information is used in daq_start() and daq_trigger()
 
         Data structure:

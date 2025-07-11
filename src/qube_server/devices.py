@@ -194,8 +194,9 @@ class QuBE_ControlPort(QuBE_DeviceBase):
 
         awg_param = AwgParam(num_wait_word=0, num_repeat=self.number_of_shots)
         waveform_name = f"{self.name}-{channel}"
+        iq = QSConstants.DAC_BITS_POW_HALF*waveform
         self.box_conn.box_unsafe.register_wavedata(
-            port=self.port_out, channel=channel, name=waveform_name, iq=waveform
+            port=self.port_out, channel=channel, name=waveform_name, iq=iq
         )
         awg_param.chunks.append(
             WaveChunk(
@@ -306,20 +307,10 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         self._acq_mode[mux] = mode
 
     def set_acquisition_fir_coefficient(self, muxch, coeffs):
-        def fircoef_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_FCBIT_POW_HALF).astype(int)
-
-        self._fir_coefs[muxch] = fircoef_DACify(coeffs)
+        self._fir_coefs[muxch] = coeffs
 
     def set_acquisition_window_coefficient(self, muxch, coeffs):
-        def window_DACify(coeffs):
-            return (np.real(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(
-                int
-            ) + 1j * (np.imag(coeffs) * QSConstants.ACQ_WCBIT_POW_HALF).astype(int)
-
-        self._window_coefs[muxch] = window_DACify(coeffs)
+        self._window_coefs[muxch] = coeffs
 
     def upload_readout_parameters(self, muxch):
         """
@@ -408,9 +399,9 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
 
         if decim:
             # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-            param.realfirs_real_coeff = self._fir_coefs[mux].real
-            param.realfirs_imag_coeff = self._fir_coefs[mux].imag
-            param.realfirs_enable = True
+            param.complexfir_coeff = self._fir_coefs[mux]
+            param.complexfir_exponent_offset = QSConstants.ACQ_FCBIT_EXP_OFFSET
+            param.complexfir_enable = True
             param.decimation_enable = True
         if averg:
             # [Averaging] Averaging datapoints for all experiments.
@@ -423,7 +414,7 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
             # in the readout window.
             # resp = self.configure_readout_summation(mux, param, summn)
             param.sum_enable = True
-            param.sum_range = (0, param.num_section)
+            param.sum_range = (0, (len(self._window_coefs[mux])//4)-1)
             param.window_enable = True
             param.window_coeff = self._window_coefs[mux]
 

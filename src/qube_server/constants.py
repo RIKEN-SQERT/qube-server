@@ -60,14 +60,13 @@ class QSConstants:
     #   taps prior to decimation process.
     ACQ_FCOEF_BITS = 16  # - The number of vertical bits of the
     #   FIR filter coefficient.
-    ACQ_FCBIT_POW_HALF = 2**15  # - equivalent to 2^(ACQ_FCOEF_BITS-1).
+    ACQ_FCBIT_EXP_OFFSET = 15  # - ACQ_FCOEF_BITS-1.
     ACQ_MAX_WCOEF = 256  # - The maximally applicable complex
     #   window coefficients. It is equiva-
     #   lent to ACQ_MAXWINDOW * ADCDCM_
     #   SAMPLE_R.
     ACQ_WCOEF_BITS = 31  # - The number of vertical bits of the
     #   complex window coefficients.
-    ACQ_WCBIT_POW_HALF = 2**30  # - equivalent to 2^(ACQ_WCOEF_BITS-1)
     ACQ_MAXNUMCAPT = 8  # - Maximum iteration number of acquisi-
     #   tion window in a single sequence.
     #   DEBUG: There is no obvious reason to
@@ -97,7 +96,7 @@ class QSConstants:
     DAQ_INITSDLY = 1  # seconds; synchronization delay
     ACQ_INITMODE = "3"
     ACQ_INITWINDOW = [(0, 2048)]  # initial demodulation windows
-    ACQ_INITFIRCOEF = np.array([1] * 8).astype(
+    ACQ_INITFIRCOEF = np.array([1] * 16).astype(
         complex
     )  # initial complex FIR filter coeffs
     ACQ_INITWINDCOEF = np.array([]).astype(complex)  # initial complex window coeffs
