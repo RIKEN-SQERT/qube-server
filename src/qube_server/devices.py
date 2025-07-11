@@ -399,7 +399,7 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
 
         if decim:
             # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-            param.complexfir_coeff = self._fir_coefs[mux]
+            param.complexfir_coeff = np.array(self._fir_coefs[mux])[::-1] # reverse the order for covolution (e7agwhal will implement this in future)
             param.complexfir_exponent_offset = QSConstants.ACQ_FCBIT_EXP_OFFSET
             param.complexfir_enable = True
             param.decimation_enable = True
