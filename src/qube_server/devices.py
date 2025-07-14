@@ -7,18 +7,37 @@ from typing import NamedTuple, Optional, TypedDict, cast
 
 import numpy as np
 from labrad.devices import DeviceWrapper
-from quel_ic_config import AwgParam, CapParam, CapSection, Quel1PortType, WaveChunk
+from quel_ic_config import AwgParam, CapParam, CapSection, Quel1PortType, WaveChunk, Quel1BoxType
 
 from .box_connection import BoxConnection
 from .constants import QSConstants, QSMessage
 
 
 class DeviceType(Enum):
-    ctrl = auto()
-    readout = auto()
-    fogi = auto()
-    pump = auto()
+    ctrl = "control"
+    readout = "readout"
+    pump = "pump"
+    readin = "readin"  # paired with readout, just used for creating device_name
 
+ADC_DAC_PORT_PAIR_DICT: dict[Quel1BoxType, dict[Quel1PortType, Quel1PortType]] = {
+    Quel1BoxType.QuEL1SE_RIKEN8: {
+        0: 1
+    }
+}
+
+DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
+    Quel1BoxType.QuEL1SE_RIKEN8: {
+        0: DeviceType.readin,
+        1: DeviceType.readout,
+        (1, 1): DeviceType.ctrl,
+        2: DeviceType.pump,
+        3: DeviceType.ctrl,
+        6: DeviceType.ctrl,
+        7: DeviceType.ctrl,
+        8: DeviceType.ctrl,
+        9: DeviceType.ctrl
+    }
+}
 
 class DeviceConnectionInfo(NamedTuple):
     """A set of Arguments for DeviceWrapper.connect"""
@@ -49,19 +68,28 @@ def create_device_connection_infos_from_box_connection(
         elif isinstance(box_port, tuple) and len(box_port) == 2:
             return f"{port_prefix}{box_port[0]:02d}-{box_port[1]:02d}"
 
-    for input_port in box_conn._box.get_read_input_ports():
-        paired_output_ports = box_conn._box.get_loopbacks_of_port(input_port)
-        if len(paired_output_ports) < 1:
-            continue
-        paired_output_port = paired_output_ports.pop()
+    port_type_dict = DAC_PORT_TYPE_DICT[Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)]
+    port_pair_dict = ADC_DAC_PORT_PAIR_DICT[Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)]
 
-        name = f"{box_conn.box_name}-{_create_boxport_str(input_port, port_prefix='in')}-{_create_boxport_str(paired_output_port, port_prefix='out')}"
+    all_output_ports = box_conn.box_unsafe.get_output_ports()
+ 
+    for input_port in box_conn._box.get_read_input_ports():
+        if input_port in port_pair_dict:
+            paired_output_port = port_pair_dict[input_port]
+        else:
+            continue
+ 
+        input_port_type = port_type_dict[input_port]
+        output_port_type = port_type_dict[paired_output_port]
+        all_output_ports.remove(paired_output_port)
+
+        name = f"{box_conn.box_name}-{_create_boxport_str(input_port, port_prefix=f'{input_port_type.value}_')}-{_create_boxport_str(paired_output_port, port_prefix=f'{output_port_type.value}_')}"
         dev_conn_infos.append(
             DeviceConnectionInfo(
                 name=name,
                 args=DeviceConnectionInfoArgs(
                     box_conn=box_conn,
-                    device_type=DeviceType.readout,
+                    device_type=output_port_type,
                     port_in=input_port,
                     port_out=paired_output_port,
                 ),
@@ -69,16 +97,17 @@ def create_device_connection_infos_from_box_connection(
             )
         )
 
-    for output_port in box_conn._box.get_output_ports():
+    for output_port in all_output_ports:
+        output_port_type = port_type_dict[output_port]
         name = (
-            f"{box_conn.box_name}-{_create_boxport_str(output_port, port_prefix='out')}"
+            f"{box_conn.box_name}-{_create_boxport_str(output_port, port_prefix=f'{output_port_type.value}_')}"
         )
         dev_conn_infos.append(
             DeviceConnectionInfo(
                 name=name,
                 args=DeviceConnectionInfoArgs(
                     box_conn=box_conn,
-                    device_type=DeviceType.ctrl,
+                    device_type=output_port_type,
                     port_in=None,
                     port_out=output_port,
                 ),
@@ -465,9 +494,5 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         if resp:
             resp = 1.0 > np.max(np.abs(coeffs))
         return resp
-
-
-class QuBE_FogiPort(QuBE_ControlPort): ...
-
 
 class QuBE_PumpPort(QuBE_ControlPort): ...

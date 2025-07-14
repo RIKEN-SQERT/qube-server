@@ -30,7 +30,6 @@ from .devices import (
     DeviceType,
     QuBE_ControlPort,
     QuBE_DeviceBase,
-    QuBE_FogiPort,
     QuBE_PumpPort,
     QuBE_ReadoutPort,
     create_device_connection_infos_from_box_connection,
@@ -126,8 +125,6 @@ class QuBE_Server(DeviceServer):
             return QuBE_ControlPort
         elif args.device_type is DeviceType.readout:
             return QuBE_ReadoutPort
-        elif args.device_type is DeviceType.fogi:
-            return QuBE_FogiPort
         elif args.device_type is DeviceType.pump:
             return QuBE_PumpPort
         else:
@@ -187,7 +184,7 @@ class QuBE_Server(DeviceServer):
     @setting(20, "Device Type", returns=["s"])
     def device_type(self, c):
         dev = self.selectedDevice(c)
-        return dev.device_type.name
+        return dev.device_type.value
 
     @setting(100, "Shots", num_shots=["w"], returns=["w"])
     def number_of_shots(self, c, num_shots=None):
