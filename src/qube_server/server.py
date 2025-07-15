@@ -316,25 +316,22 @@ class QuBE_Server(DeviceServer):
             )
 
         # the first box is used as a tentative master
-        cur_timecounter = int(box_conns[0].box_unsafe.get_current_timecounter())
+        cur_timecounter = int(box_conns[0].get_current_timecounter())
         latest_trigger_timecounter = max(
-            bc.last_trigger_timecounter - bc.timecounter_offset for bc in box_conns
+            bc.last_trigger_timecounter for bc in box_conns
         )
         timecounter = (
             max(latest_trigger_timecounter, cur_timecounter) + delay
         ) & 0xFFFFFFFFFFFFFFF0
 
         for bc in box_conns:
-            timecounter_box = timecounter + bc.timecounter_offset
-            assert bc.last_trigger_timecounter < timecounter
             cap_task, awg_task = bc.start_capture_by_awg_trigger(
                 c.ID,
                 runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
                 channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                timecounter=timecounter_box,
+                timecounter=timecounter,
             )
-            bc.last_trigger_timecounter = timecounter_box
-            print(bc.box_name, "kick at ", timecounter_box)
+            print(bc.box_name, "kick at ", timecounter)
             c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
             c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
         release_all_locks(box_conns, c.ID)

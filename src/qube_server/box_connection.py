@@ -92,18 +92,23 @@ class BoxConnection:
         """
         return self._box
 
+    def get_current_timecounter(self) -> int:
+        return int(self._box.get_current_timecounter()) - self._timecounter_offset
+
     def get_latest_sysref_timecounter(self) -> int:
-        return int(self._box.get_latest_sysref_timecounter())
+        return int(self._box.get_latest_sysref_timecounter()) - self._timecounter_offset
 
     def start_capture_by_awg_trigger(
         self,
         context_id: ContextId,
         runits: Collection[tuple[Quel1PortType, int]],
         channels: Collection[tuple[Quel1PortType, int]],
-        timecounter: Optional[int] = None,
+        timecounter: int,
     ) -> tuple[BoxStartCapunitsByTriggerTask, AbstractStartAwgunitsTask]:
+        self._last_trigger_timecounter = timecounter
+        timecounter_raw = timecounter + self._timecounter_offset
         return self.get_box(context_id).start_capture_by_awg_trigger(
-            runits=runits, channels=channels, timecounter=timecounter
+            runits=runits, channels=channels, timecounter=timecounter_raw
         )
 
 
