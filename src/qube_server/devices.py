@@ -194,7 +194,7 @@ class QuBE_ControlPort(QuBE_DeviceBase):
 
         awg_param = AwgParam(num_wait_word=0, num_repeat=self.number_of_shots)
         waveform_name = f"{self.name}-{channel}"
-        iq = QSConstants.DAC_BITS_POW_HALF*waveform
+        iq = QSConstants.DAC_BITS_POW_HALF * waveform
         self.box_conn.box_unsafe.register_wavedata(
             port=self.port_out, channel=channel, name=waveform_name, iq=iq
         )
@@ -414,7 +414,7 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
             # in the readout window.
             # resp = self.configure_readout_summation(mux, param, summn)
             param.sum_enable = True
-            param.sum_range = (0, (len(self._window_coefs[mux])//4)-1)
+            param.sum_range = (0, (len(self._window_coefs[mux]) // 4) - 1)
             param.window_enable = True
             param.window_coeff = self._window_coefs[mux]
 

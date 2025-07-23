@@ -173,33 +173,29 @@ def test_daq_trigger_when_little_margin_from_last(
         box_conn_a.box_name: {(0, 0), (2, 0), (3, 2)},
         box_conn_b.box_name: {(1, 0), (2, 1)},
     }
-    latest_time_counter = 0b000100
-    box_conn_a.last_trigger_timecounter = 0b010100
-    box_conn_a.timecounter_offset = 0b0100
+    current_timecounter = int(QSConstants.SYNC_CLOCK * 100.0)
+    box_conn_a.last_trigger_timecounter = int(QSConstants.SYNC_CLOCK * 100.5)
     box_conn_a.start_capture_by_awg_trigger.return_value = (None, None)
-    box_conn_a.get_latest_sysref_timecounter.return_value = latest_time_counter
-    box_conn_b.last_trigger_timecounter = 0b111100
-    box_conn_b.timecounter_offset = 0b1100
+    box_conn_a.get_current_timecounter.return_value = current_timecounter
+    box_conn_b.last_trigger_timecounter = int(QSConstants.SYNC_CLOCK * 40.0)
     box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
-    box_conn_b.get_latest_sysref_timecounter.return_value = latest_time_counter
+    box_conn_b.get_current_timecounter.return_value = current_timecounter
 
     result = server.daq_trigger(context)
     assert result is True
 
-    expected_common_clock = (
-        0b110000 + int(2 * QSConstants.SYNC_CLOCK + 0.5)
-    ) & 0xFFFFFFFFF0
+    expected_timecounter = int(QSConstants.SYNC_CLOCK * 102.5)
     box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(4, 0)},
         channels={(0, 0), (2, 0), (3, 2)},
-        timecounter=expected_common_clock + 0b0100,
+        timecounter=expected_timecounter,
     )
     box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(5, 1)},
         channels={(1, 0), (2, 1)},
-        timecounter=expected_common_clock + 0b1100,
+        timecounter=expected_timecounter,
     )
 
 
@@ -226,6 +222,14 @@ def test_daq_trigger_when_large_margin_from_last(
         box_conn_a.box_name: {(0, 0), (2, 0), (3, 2)},
         box_conn_b.box_name: {(1, 0), (2, 1)},
     }
+    current_timecounter = int(QSConstants.SYNC_CLOCK * 100.0)
+    box_conn_a.last_trigger_timecounter = int(QSConstants.SYNC_CLOCK * 50.0)
+    box_conn_a.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_a.get_current_timecounter.return_value = current_timecounter
+    box_conn_b.last_trigger_timecounter = int(QSConstants.SYNC_CLOCK * 40.0)
+    box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
+    box_conn_b.get_current_timecounter.return_value = current_timecounter
+
     latest_time_counter = 0b1_000000
     box_conn_a.last_trigger_timecounter = 0b010100
     box_conn_a.timecounter_offset = 0b0100
@@ -239,20 +243,18 @@ def test_daq_trigger_when_large_margin_from_last(
     result = server.daq_trigger(context)
     assert result is True
 
-    expected_common_clock = (
-        0b1_000000 + int(2 * QSConstants.SYNC_CLOCK + 0.5)
-    ) & 0xFFFFFFFFF0
+    expected_timecounter = int(QSConstants.SYNC_CLOCK * 102.0)
     box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(4, 0)},
         channels={(0, 0), (2, 0), (3, 2)},
-        timecounter=expected_common_clock + 0b0100,
+        timecounter=expected_timecounter,
     )
     box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(5, 1)},
         channels={(1, 0), (2, 1)},
-        timecounter=expected_common_clock + 0b1100,
+        timecounter=expected_timecounter,
     )
 
 
