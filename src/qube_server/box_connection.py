@@ -111,6 +111,17 @@ class BoxConnection:
             runits=runits, channels=channels, timecounter=timecounter_raw
         )
 
+    def start_wavegen(
+        self,
+        context_id: ContextId,
+        channels: Collection[tuple[Quel1PortType, int]],
+        timecounter: int,
+    ) -> AbstractStartAwgunitsTask:
+        self._last_trigger_timecounter = timecounter
+        timecounter_raw = timecounter + self._timecounter_offset
+        return self.get_box(context_id).start_wavegen(
+            channels=channels, timecounter=timecounter_raw
+        )
 
 def acquire_all_locks(
     box_conns: Collection[BoxConnection],

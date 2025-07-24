@@ -322,15 +322,22 @@ class QuBE_Server(DeviceServer):
         ) & 0xFFFFFFFFFFFFFFF0
 
         for bc in box_conns:
-            cap_task, awg_task = bc.start_capture_by_awg_trigger(
-                c.ID,
-                runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
-                channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                timecounter=timecounter,
-            )
-            print(bc.box_name, "kick at ", timecounter)
-            c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
+            if bc.box_name in c[QSConstants.ACQ_CNXT_TAG]:
+                cap_task, awg_task = bc.start_capture_by_awg_trigger(
+                    c.ID,
+                    runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
+                    channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
+                    timecounter=timecounter,
+                )
+                c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
+            else:
+                awg_task = bc.start_wavegen(
+                    c.ID,
+                    channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
+                    timecounter=timecounter,
+                )
             c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
+            print(bc.box_name, "kick at ", timecounter)
         release_all_locks(box_conns, c.ID)
         return True
 
