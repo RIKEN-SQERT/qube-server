@@ -22,6 +22,12 @@ class DeviceType(Enum):
 ADC_DAC_PORT_PAIR_DICT: dict[Quel1BoxType, dict[Quel1PortType, Quel1PortType]] = {
     Quel1BoxType.QuEL1SE_RIKEN8: {
         0: 1
+    },
+    Quel1BoxType.QuEL1_TypeA: {
+        0: 1,
+        7: 8
+    },
+    Quel1BoxType.QuEL1_TypeB: {
     }
 }
 
@@ -36,6 +42,28 @@ DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
         7: DeviceType.ctrl,
         8: DeviceType.ctrl,
         9: DeviceType.ctrl
+    },
+    Quel1BoxType.QuEL1_TypeA: {
+        0: DeviceType.readin,
+        1: DeviceType.readout,
+        2: DeviceType.ctrl,
+        3: DeviceType.pump,
+        4: DeviceType.ctrl,
+        7: DeviceType.readin,
+        8: DeviceType.readout,
+        9: DeviceType.ctrl,
+        10: DeviceType.pump,
+        11: DeviceType.ctrl
+    },
+    Quel1BoxType.QuEL1_TypeB: {
+        1: DeviceType.ctrl,
+        2: DeviceType.ctrl,
+        3: DeviceType.ctrl,
+        4: DeviceType.ctrl,
+        8: DeviceType.ctrl,
+        9: DeviceType.ctrl,
+        10: DeviceType.ctrl,
+        11: DeviceType.ctrl
     }
 }
 
