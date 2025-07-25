@@ -114,7 +114,7 @@ def create_device_connection_infos_from_box_connection(
 
     all_output_ports = box_conn.box_unsafe.get_output_ports()
 
-    for input_port in box_conn._box.get_read_input_ports():
+    for input_port in box_conn.box_unsafe.get_read_input_ports():
         if input_port in port_pair_dict:
             paired_output_port = port_pair_dict[input_port]
         else:
@@ -468,7 +468,6 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         if decim:
             # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
             param.complexfir_coeff = np.array(self._fir_coefs[mux])
-            param.complexfir_exponent_offset = QSConstants.ACQ_FCBIT_EXP_OFFSET
             param.complexfir_enable = True
             param.decimation_enable = True
         if averg:

@@ -40,6 +40,10 @@ uv run qube_server
 
 ## For Developers
 
+To configure your development environment, create a `.env` file.
+An example, `.env.example`, is included in the project.
+As the first step, run `cp .env.example .env` and then modify the new `.env` file.
+
 To run linter and formatter, execute `make` command as following:
 
 ```

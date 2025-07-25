@@ -10,6 +10,8 @@ dependencies = [
     "e7awghal>=0.1.5",
     "pydantic>=2.4.2",
     "pylabrad>=0.98.2",
+    "pytest-twisted>=1.14.3",
+    "python-dotenv>=1.1.1",
     "quel_ic_config>=0.10.4",
 ]
 

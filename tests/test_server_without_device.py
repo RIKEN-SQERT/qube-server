@@ -57,7 +57,8 @@ def _get_dummy_registry():
 def qube_server():
     server = QuBE_Server()
     server.log = MagicMock()
-    server._get_registry_service = _get_dummy_registry  # type: ignore
+    server._get_possible_links = lambda: {}  # type: ignore
+    server._get_skew_config = lambda: {}  # type: ignore
     DeviceServer.initServer(server)
     return server
 
