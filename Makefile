@@ -1,6 +1,9 @@
 lint:
 	uv run ruff check .
 
+fix-lint-errors:
+	uv run ruff check --fix
+
 format:
 	uv run ruff check --select I --fix
 	uv run ruff format
