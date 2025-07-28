@@ -123,6 +123,7 @@ class BoxConnection:
             channels=channels, timecounter=timecounter_raw
         )
 
+
 def acquire_all_locks(
     box_conns: Collection[BoxConnection],
     context_id: ContextId,

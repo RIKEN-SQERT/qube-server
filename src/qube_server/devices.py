@@ -2,12 +2,19 @@ from __future__ import annotations
 
 import copy
 from abc import abstractmethod
-from enum import Enum, auto
+from enum import Enum
 from typing import NamedTuple, Optional, TypedDict, cast
 
 import numpy as np
 from labrad.devices import DeviceWrapper
-from quel_ic_config import AwgParam, CapParam, CapSection, Quel1PortType, WaveChunk, Quel1BoxType
+from quel_ic_config import (
+    AwgParam,
+    CapParam,
+    CapSection,
+    Quel1BoxType,
+    Quel1PortType,
+    WaveChunk,
+)
 
 from .box_connection import BoxConnection
 from .constants import QSConstants, QSMessage
@@ -19,16 +26,11 @@ class DeviceType(Enum):
     pump = "pump"
     readin = "readin"  # paired with readout, just used for creating device_name
 
+
 ADC_DAC_PORT_PAIR_DICT: dict[Quel1BoxType, dict[Quel1PortType, Quel1PortType]] = {
-    Quel1BoxType.QuEL1SE_RIKEN8: {
-        0: 1
-    },
-    Quel1BoxType.QuEL1_TypeA: {
-        0: 1,
-        7: 8
-    },
-    Quel1BoxType.QuEL1_TypeB: {
-    }
+    Quel1BoxType.QuEL1SE_RIKEN8: {0: 1},
+    Quel1BoxType.QuEL1_TypeA: {0: 1, 7: 8},
+    Quel1BoxType.QuEL1_TypeB: {},
 }
 
 DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
@@ -41,7 +43,7 @@ DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
         6: DeviceType.ctrl,
         7: DeviceType.ctrl,
         8: DeviceType.ctrl,
-        9: DeviceType.ctrl
+        9: DeviceType.ctrl,
     },
     Quel1BoxType.QuEL1_TypeA: {
         0: DeviceType.readin,
@@ -53,7 +55,7 @@ DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
         8: DeviceType.readout,
         9: DeviceType.ctrl,
         10: DeviceType.pump,
-        11: DeviceType.ctrl
+        11: DeviceType.ctrl,
     },
     Quel1BoxType.QuEL1_TypeB: {
         1: DeviceType.ctrl,
@@ -63,9 +65,10 @@ DAC_PORT_TYPE_DICT: dict[Quel1BoxType, dict[Quel1PortType, DeviceType]] = {
         8: DeviceType.ctrl,
         9: DeviceType.ctrl,
         10: DeviceType.ctrl,
-        11: DeviceType.ctrl
-    }
+        11: DeviceType.ctrl,
+    },
 }
+
 
 class DeviceConnectionInfo(NamedTuple):
     """A set of Arguments for DeviceWrapper.connect"""
@@ -96,17 +99,21 @@ def create_device_connection_infos_from_box_connection(
         elif isinstance(box_port, tuple) and len(box_port) == 2:
             return f"{port_prefix}{box_port[0]:02d}-{box_port[1]:02d}"
 
-    port_type_dict = DAC_PORT_TYPE_DICT[Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)]
-    port_pair_dict = ADC_DAC_PORT_PAIR_DICT[Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)]
+    port_type_dict = DAC_PORT_TYPE_DICT[
+        Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)
+    ]
+    port_pair_dict = ADC_DAC_PORT_PAIR_DICT[
+        Quel1BoxType.fromstr(box_conn.box_unsafe.boxtype)
+    ]
 
     all_output_ports = box_conn.box_unsafe.get_output_ports()
- 
+
     for input_port in box_conn._box.get_read_input_ports():
         if input_port in port_pair_dict:
             paired_output_port = port_pair_dict[input_port]
         else:
             continue
- 
+
         input_port_type = port_type_dict[input_port]
         output_port_type = port_type_dict[paired_output_port]
         all_output_ports.remove(paired_output_port)
@@ -127,9 +134,7 @@ def create_device_connection_infos_from_box_connection(
 
     for output_port in all_output_ports:
         output_port_type = port_type_dict[output_port]
-        name = (
-            f"{box_conn.box_name}-{_create_boxport_str(output_port, port_prefix=f'{output_port_type.value}_')}"
-        )
+        name = f"{box_conn.box_name}-{_create_boxport_str(output_port, port_prefix=f'{output_port_type.value}_')}"
         dev_conn_infos.append(
             DeviceConnectionInfo(
                 name=name,
@@ -456,7 +461,11 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
 
         if decim:
             # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-            param.complexfir_coeff = np.array(self._fir_coefs[mux])[::-1] # reverse the order for covolution (e7agwhal will implement this in future)
+            param.complexfir_coeff = np.array(
+                self._fir_coefs[mux]
+            )[
+                ::-1
+            ]  # reverse the order for covolution (e7agwhal will implement this in future)
             param.complexfir_exponent_offset = QSConstants.ACQ_FCBIT_EXP_OFFSET
             param.complexfir_enable = True
             param.decimation_enable = True
@@ -522,5 +531,6 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         if resp:
             resp = 1.0 > np.max(np.abs(coeffs))
         return resp
+
 
 class QuBE_PumpPort(QuBE_ControlPort): ...
