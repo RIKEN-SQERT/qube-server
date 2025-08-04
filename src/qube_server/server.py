@@ -32,6 +32,7 @@ from .devices import (
     QuBE_DeviceBase,
     QuBE_PumpPort,
     QuBE_ReadoutPort,
+    RfSwitchState,
     create_device_connection_infos_from_box_connection,
 )
 from .model import PossibleLinks, Skews
@@ -1087,6 +1088,29 @@ class QuBE_Server(DeviceServer):
         else:
             dev.set_mix_sideband(sideband)
         return sideband
+
+    @setting(505, "Internal loopback", enabled=["b"], returns=["b"])
+    def internal_loopback(self, c, enabled=None):
+        """
+        Enable loopback by controlling the rfswitches at the input and output ports.
+
+        Args:
+            enabled : b (bool)
+                If True, the internal loopback is enabled and no output.
+        Returns:
+            enabled : b (bool)
+                Current state of the switch.
+        """
+        dev = self.selectedDevice(c)
+
+        if dev.device_type is not DeviceType.readout:
+            ValueError(f"Loopback is not available for the device {dev.name}.")
+
+        if enabled is True:
+            dev.set_rfswitch(RfSwitchState.loop)
+        elif enabled is False:
+            dev.set_rfswitch(RfSwitchState.open)
+        return dev.get_rfswitch()
 
 
 def _convert_to_builtin_type(np_array, ensure_list=False):

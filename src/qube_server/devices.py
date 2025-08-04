@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import copy
 from abc import abstractmethod
-from enum import Enum
+from enum import Enum, auto
 from typing import NamedTuple, Optional, TypedDict, cast
 
 import numpy as np
@@ -25,6 +25,12 @@ class DeviceType(Enum):
     readout = "readout"
     pump = "pump"
     readin = "readin"  # paired with readout, just used for creating device_name
+
+
+class RfSwitchState(Enum):
+    undefined = auto()
+    loop = auto()
+    open = auto()
 
 
 ADC_DAC_PORT_PAIR_DICT: dict[Quel1BoxType, dict[Quel1PortType, Quel1PortType]] = {
@@ -486,6 +492,25 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
     def get_adc_coarse_frequency(self):
         dumped = self.box_conn.box_unsafe.dump_port(self.port_in)
         return dumped["cnco_freq"]
+
+    def get_rfswitch(self) -> RfSwitchState:
+        state_in = self.box_conn.box_unsafe.dump_rfswitch(self.port_in)
+        state_out = self.box_conn.box_unsafe.dump_rfswitch(self.port_out)
+        if (state_in, state_out) == ("loop", "block"):
+            return RfSwitchState.loop
+        elif (state_in, state_out) == ("open", "pass"):
+            return RfSwitchState.open
+        return RfSwitchState.undefined
+
+    def set_rfswitch(self, state: RfSwitchState):
+        if state is RfSwitchState.open:
+            in_switch_str, out_switch_str = "open", "pass"
+        elif state is RfSwitchState.loop:
+            in_switch_str, out_switch_str = "loop", "block"
+        else:
+            raise ValueError(f"Unavailable switch state: {state}")
+        self.box_conn.box_unsafe.config_rfswitch(self.port_in, rfswitch=in_switch_str)
+        self.box_conn.box_unsafe.config_rfswitch(self.port_out, rfswitch=out_switch_str)
 
     def static_check_adc_coarse_frequency(self, freq):
         resolution = QSConstants.ADC_CNCO_RESOL
