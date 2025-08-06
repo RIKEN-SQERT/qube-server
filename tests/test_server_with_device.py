@@ -1,5 +1,6 @@
 import os
 import random
+from collections.abc import Iterator
 from unittest.mock import MagicMock
 
 import matplotlib.pyplot as plt
@@ -7,6 +8,7 @@ import numpy as np
 import pytest
 from dotenv import load_dotenv
 from labrad import types as T
+from labrad.devices import DeviceLockedError
 from labrad.units import ns
 from labrad.util import ContextDict
 from quel_ic_config import force_unlock_all_boxes
@@ -59,25 +61,30 @@ def context() -> ContextDict:
     return context
 
 
-def _find_readout_portname(qube_server) -> str:
+@pytest.fixture
+def another_context() -> ContextDict:
+    context = ContextDict()
+    context.ID = 8888  # type: ignore
+    return context
+
+
+def _find_readout_portname(qube_server) -> Iterator[str]:
     _, names = qube_server.deviceLists()
     for name in names:
         if "readin" in name and "readout" in name:
-            return name
-    raise RuntimeError(f"Paired port not found from {qube_server.name}.")
+            yield name
 
 
-def _find_control_portname(qube_server) -> str:
+def _find_control_portname(qube_server) -> Iterator[str]:
     _, names = qube_server.deviceLists()
     for name in names:
         if "control" in name:
-            return name
-    raise RuntimeError(f"Control port not found from {qube_server.name}.")
+            yield name
 
 
 @test_with_devices
 def test_readin_readout_with_decimation(qube_server: QuBE_Server, context):
-    readout_portname = _find_readout_portname(qube_server)
+    readout_portname = next(_find_readout_portname(qube_server))
 
     sequence_length = 10.24  # in us. length must be a multiple of 10240ns.
     n_sample = int(sequence_length * QSConstants.DACBB_SAMPLE_R + 0.5)
@@ -137,6 +144,33 @@ def test_readin_readout_with_decimation(qube_server: QuBE_Server, context):
 
     correlation = np.sum(multipled)
     assert np.abs(correlation) > 0.94
+
+
+@test_with_devices
+def test_lock_device(qube_server: QuBE_Server, context, another_context):
+    portname_iter = _find_control_portname(qube_server)
+    port1 = next(portname_iter)
+    port2 = next(portname_iter)
+
+    qube_server.select_device(context, port1)  # type: ignore
+    qube_server.lock_device(context, timeout=None)
+
+    # without error
+    qube_server.select_device(context, port1)  # type: ignore
+
+    # raises DeviceLockedError when accessed with another context
+    with pytest.raises(DeviceLockedError):
+        qube_server.select_device(another_context, port1)  # type: ignore
+
+    # selecting to another device with another context does not raise the error.
+    qube_server.select_device(another_context, port2)  # type: ignore
+
+    # release lock for the device
+    qube_server.select_device(context, port1)  # type: ignore
+    qube_server.release_device(context)
+
+    # port1 is selectable from another context now
+    qube_server.select_device(another_context, port1)  # type: ignore
 
 
 @test_with_devices
