@@ -142,4 +142,4 @@ notebooks/
 
 qubesrv/config/
 
-.prebuilt
+artifacts/

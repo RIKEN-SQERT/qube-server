@@ -19,11 +19,6 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@v5
 
-      - name: Install build dependencies
-        run: |
-          : # sudo apt-get update
-          sudo apt-get install libcairo2-dev pkg-config python3-dev libgirepository-2.0-dev
-
       - name: Install the project
         run: uv sync --locked --dev
 

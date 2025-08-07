@@ -7,7 +7,8 @@ from typing import Any, Final, Optional, cast
 
 import numpy as np
 from labrad import types as T
-from labrad.devices import DeviceServer
+from labrad.devices import DeviceLockedError, DeviceServer, DeviceWrapper
+from labrad.errors import DeviceNotSelectedError
 from labrad.server import setting
 from labrad.units import Value
 from quel_ic_config import (
@@ -22,7 +23,7 @@ from typing_extensions import TypeAlias
 
 from qube_server.utils import is_reachable
 
-from .box_connection import BoxConnection, acquire_all_locks, release_all_locks
+from .box_connection import BoxConnection, locked_boxes
 from .constants import QSConstants, QSMessage
 from .devices import (
     DeviceConnectionInfo,
@@ -32,6 +33,7 @@ from .devices import (
     QuBE_DeviceBase,
     QuBE_PumpPort,
     QuBE_ReadoutPort,
+    RfSwitchState,
     create_device_connection_infos_from_box_connection,
 )
 from .model import PossibleLinks, Skews
@@ -147,14 +149,17 @@ class QuBE_Server(DeviceServer):
                     )
 
                 print(QSMessage.CNCTABLE_QUBEUNIT.format(box_link.name))
-                box = Quel1Box.create(
-                    ipaddr_wss=box_link.ipaddr_wss,
-                    boxtype=Quel1BoxType.fromstr(box_link.boxtype),
-                )
-                box.reconnect()
+
+                def _box_factory():
+                    box = Quel1Box.create(
+                        ipaddr_wss=box_link.ipaddr_wss,
+                        boxtype=Quel1BoxType.fromstr(box_link.boxtype),
+                    )
+                    return box
+
                 box_conn = BoxConnection(
                     box_name=box_link.name,
-                    box=box,
+                    box_factory=_box_factory,
                     timecounter_offset=box_name_to_timecounter_offset[box_link.name],
                 )
                 self._name_to_box_conn[box_link.name] = box_conn
@@ -305,40 +310,34 @@ class QuBE_Server(DeviceServer):
 
         chassis_list = c[QSConstants.DAC_CNXT_TAG].keys()
         box_conns = [self._name_to_box_conn[box_name] for box_name in chassis_list]
-        if not acquire_all_locks(
-            box_conns, c.ID, timeout_duration=BOXLOCK_TIMEOUT_DURATION
-        ):
-            raise RuntimeError(
-                "Failed to atomically acquire locks because they are held by another context."
+
+        with locked_boxes(box_conns, c.ID, timeout_duration=BOXLOCK_TIMEOUT_DURATION):
+            # the first box is used as a tentative master
+            cur_timecounter = int(box_conns[0].get_current_timecounter())
+            latest_trigger_timecounter = max(
+                bc.last_trigger_timecounter for bc in box_conns
             )
+            timecounter = (
+                max(latest_trigger_timecounter, cur_timecounter) + delay
+            ) & 0xFFFFFFFFFFFFFFF0
 
-        # the first box is used as a tentative master
-        cur_timecounter = int(box_conns[0].get_current_timecounter())
-        latest_trigger_timecounter = max(
-            bc.last_trigger_timecounter for bc in box_conns
-        )
-        timecounter = (
-            max(latest_trigger_timecounter, cur_timecounter) + delay
-        ) & 0xFFFFFFFFFFFFFFF0
-
-        for bc in box_conns:
-            if bc.box_name in c[QSConstants.ACQ_CNXT_TAG]:
-                cap_task, awg_task = bc.start_capture_by_awg_trigger(
-                    c.ID,
-                    runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
-                    channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                    timecounter=timecounter,
-                )
-                c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
-            else:
-                awg_task = bc.start_wavegen(
-                    c.ID,
-                    channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                    timecounter=timecounter,
-                )
-            c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
-            print(bc.box_name, "kick at ", timecounter)
-        release_all_locks(box_conns, c.ID)
+            for bc in box_conns:
+                if bc.box_name in c[QSConstants.ACQ_CNXT_TAG]:
+                    cap_task, awg_task = bc.start_capture_by_awg_trigger(
+                        c.ID,
+                        runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
+                        channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
+                        timecounter=timecounter,
+                    )
+                    c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
+                else:
+                    awg_task = bc.start_wavegen(
+                        c.ID,
+                        channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
+                        timecounter=timecounter,
+                    )
+                c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
+                print(bc.box_name, "kick at ", timecounter)
         return True
 
     @setting(107, "DAQ Stop", returns=["b"])
@@ -1087,6 +1086,63 @@ class QuBE_Server(DeviceServer):
         else:
             dev.set_mix_sideband(sideband)
         return sideband
+
+    @setting(505, "Internal loopback", enabled=["b"], returns=["b"])
+    def internal_loopback(self, c, enabled=None):
+        """
+        Enable loopback by controlling the rfswitches at the input and output ports.
+
+        Args:
+            enabled : b (bool)
+                If True, the internal loopback is enabled and no output.
+        Returns:
+            enabled : b (bool)
+                Current state of the switch.
+        """
+        dev = self.selectedDevice(c)
+
+        if dev.device_type is not DeviceType.readout:
+            ValueError(f"Loopback is not available for the device {dev.name}.")
+
+        if enabled is True:
+            dev.set_rfswitch(RfSwitchState.loop)
+        elif enabled is False:
+            dev.set_rfswitch(RfSwitchState.open)
+        return dev.get_rfswitch()
+
+    @setting(600, "List Boxes", returns=["*s"])
+    def list_boxes(self, c):
+        return list(self._name_to_box_conn.keys())
+
+    @setting(601, "Reconnect Box", box_name=["s"], linkup=["b"], returns=["b"])
+    def reconnect_box(self, c, box_name, linkup=False):
+        if box_name not in self._name_to_box_conn:
+            raise ValueError(f"Box with name {box_name} not found.")
+        box_conn = self._name_to_box_conn[box_name]
+
+        try:
+            _dev_selected: Optional[DeviceWrapper] = self.selectedDevice(c)
+        except DeviceNotSelectedError:
+            _dev_selected = None
+        locked_devices = []
+        try:
+            for dev in self.devices.values():
+                if dev.box_conn.box_name == box_name:
+                    self.selectDevice(c, dev.name)
+                    self.lock_device(c, timeout=None)
+                    locked_devices.append(dev)
+
+            with locked_boxes([box_conn], c.ID):
+                box_conn.disconnect(c.ID)
+                box_conn.connect(linkup)
+        except DeviceLockedError as e:
+            print(sys._getframe().f_code.co_name, e)  # TODO: improve the message
+        finally:
+            for dev in locked_devices:
+                self.selectDevice(c, dev.name)
+                self.release_device(c)
+            if _dev_selected is not None:
+                self.selectDevice(c, _dev_selected.name)
 
 
 def _convert_to_builtin_type(np_array, ensure_list=False):
