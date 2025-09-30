@@ -34,7 +34,9 @@ test_with_devices = pytest.mark.skipif(
 
 @pytest.fixture(scope="function")
 def qube_server_base():
-    server = QuBE_Server()
+    server = QuBE_Server(
+        deskew_conf_filepath=os.environ.get("QS_TEST_DESKEW_CONF_PATH", default=None)
+    )
     server.log = MagicMock()
     with open(os.environ["QS_TEST_LINKS_JSON_PATH"]) as fp:
         links = PossibleLinks.model_validate_json(fp.read())
@@ -188,3 +190,8 @@ def test_reconnect_box(qube_server: QuBE_Server, context):
 def test_relinkup_box(qube_server: QuBE_Server, context):
     box_names = qube_server.list_boxes(context)
     qube_server.reconnect_box(context, box_names[0], linkup=True)
+
+
+@test_with_devices
+def test_reload_deskew_conf(qube_server: QuBE_Server, context):
+    qube_server.load_deskew_conf(context)

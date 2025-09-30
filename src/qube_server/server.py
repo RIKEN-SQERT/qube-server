@@ -17,6 +17,7 @@ from quel_ic_config import (
     Quel1Box,
     Quel1BoxType,
 )
+from quel_ic_config_utils import deskew_tools
 from twisted.internet import defer, reactor, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
 from typing_extensions import TypeAlias
@@ -56,11 +57,16 @@ class QuBE_Server(DeviceServer):
         self,
         possible_links_json_filepath: Optional[str] = None,
         chassis_skew_json_filepath: Optional[str] = None,
+        deskew_conf_filepath: Optional[str] = None,
     ):
         super().__init__()
         self._name_to_box_conn: dict[str, BoxConnection] = {}
         self._possible_links_json_filepath = possible_links_json_filepath
         self._chassis_skew_json_filepath = chassis_skew_json_filepath
+        self._deskew_conf_filepath = deskew_conf_filepath
+        self._stable_count_proposer = deskew_tools.StableCountProposer()
+        self.chassisSkew = Skews(boxes=[])
+        self.possibleLinks = PossibleLinks(boxes=[])
 
     @inlineCallbacks
     def _get_possible_links(self):
@@ -152,15 +158,17 @@ class QuBE_Server(DeviceServer):
 
                 def _box_factory():
                     box = Quel1Box.create(
+                        name=box_link.name,
                         ipaddr_wss=box_link.ipaddr_wss,
                         boxtype=Quel1BoxType.fromstr(box_link.boxtype),
                     )
                     return box
 
                 box_conn = BoxConnection(
-                    box_name=box_link.name,
                     box_factory=_box_factory,
-                    timecounter_offset=box_name_to_timecounter_offset[box_link.name],
+                    timecounter_additional_offset=box_name_to_timecounter_offset[
+                        box_link.name
+                    ],
                 )
                 self._name_to_box_conn[box_link.name] = box_conn
 
@@ -168,7 +176,26 @@ class QuBE_Server(DeviceServer):
             dev_conn_infos.extend(
                 create_device_connection_infos_from_box_connection(box_conn)
             )
+
+        self._update_deskew_conf()
         return dev_conn_infos
+
+    def _update_deskew_conf(self):
+        if self._deskew_conf_filepath:
+            with open(self._deskew_conf_filepath) as io:
+                self._deskew_conf = self._deskew_conf = (
+                    deskew_tools.DeskewConfiguration.model_validate_json(io.read())
+                )
+        else:
+            self._deskew_conf = deskew_tools.DeskewConfiguration(boxes=[])
+
+        self._stable_count_proposer = (
+            deskew_tools.StableCountProposer.from_deskew_configuration(
+                self._deskew_conf
+            )
+        )
+        for box_conn in self._name_to_box_conn.values():
+            box_conn.update_deskew_conf(self._deskew_conf)
 
     @setting(10, "Reload Skew", returns=["b"])
     def reload_config_skew(self, c):
@@ -315,8 +342,8 @@ class QuBE_Server(DeviceServer):
             for bc in box_conns:
                 # Waits for the sequencer to complete the present wave generation.
                 # This is a workaround to prevent the sequencer from freezing.
-                for _attempt in range(10):
-                    if bc.is_sequencer_avaliable():
+                for _attempt in range(30):
+                    if bc.is_sequencer_available():
                         break
                     print(
                         f"The sequencer of `{bc.box_name}` is not available. retry after 0.1 sec.（{_attempt + 1} / 10）"
@@ -334,9 +361,10 @@ class QuBE_Server(DeviceServer):
             latest_trigger_timecounter = max(
                 bc.last_trigger_timecounter for bc in box_conns
             )
-            timecounter = (
-                max(latest_trigger_timecounter, cur_timecounter) + delay
-            ) & 0xFFFFFFFFFFFFFFF0
+            timecounter = max(latest_trigger_timecounter, cur_timecounter) + delay
+            name_to_count = self._stable_count_proposer.propose_trigger_counts(
+                timecounter, chassis_list
+            )
 
             for bc in box_conns:
                 if bc.box_name in c[QSConstants.ACQ_CNXT_TAG]:
@@ -344,14 +372,14 @@ class QuBE_Server(DeviceServer):
                         c.ID,
                         runits=c[QSConstants.ACQ_CNXT_TAG][bc.box_name],
                         channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                        timecounter=timecounter,
+                        timecounter=name_to_count[bc.box_name],
                     )
                     c[QSConstants.CAP_TASK_TAG][bc.box_name] = cap_task
                 else:
                     awg_task = bc.start_wavegen(
                         c.ID,
                         channels=c[QSConstants.DAC_CNXT_TAG][bc.box_name],
-                        timecounter=timecounter,
+                        timecounter=name_to_count[bc.box_name],
                     )
                 c[QSConstants.AWG_TASK_TAG][bc.box_name] = awg_task
                 print(bc.box_name, "kick at ", timecounter)
@@ -439,6 +467,15 @@ class QuBE_Server(DeviceServer):
         """
         dev = self.selectedDevice(c)
         return len(dev.channels_of_port)
+
+    @setting(112, "Device Delay Offset", t=["v[s]"], returns=["v[s]"])
+    def device_delay_offset(self, c, t=None):
+        dev = self.selectedDevice(c)
+        if t is None:
+            return T.Value(dev.delay_offset, "ps")
+        else:
+            dev.delay_offset = t["ps"]
+            return t
 
     @setting(200, "Upload Parameters", channels=["w", "*w"], returns=["b"])
     def upload_parameters(self, c, channels):
@@ -584,7 +621,7 @@ class QuBE_Server(DeviceServer):
             data    : *2c,*c
         """
 
-        dev = self.selectedDevice(c)
+        dev: QuBE_ReadoutPort = self.selectedDevice(c)
         if dev.device_type is not DeviceType.readout:
             raise Exception(QSMessage.ERR_INVALID_DEV.format("readout", dev.name))
 
@@ -601,8 +638,15 @@ class QuBE_Server(DeviceServer):
         for mux in muxchs:
             if cap_task := c[QSConstants.CAP_TASK_TAG].get(dev.chassis_name, None):
                 cap_task = cast(BoxStartCapunitsByTriggerTask, cap_task)
-                reader = cap_task.result()
-                wavelist = reader[dev.port_in, mux].as_wave_list()
+                iq_readers = cap_task.result()
+                wavedict = dev.box_conn.extract_wavedict_from_iq_reader(
+                    iq_readers[dev.port_in, mux]
+                )
+                wavelist = []
+                for i in range(len(wavedict)):
+                    if str(i) not in wavedict:
+                        continue
+                    wavelist.append(wavedict[str(i)])
                 flatten_wavelist = []
                 for section in wavelist:
                     for rep in section:
@@ -1104,6 +1148,24 @@ class QuBE_Server(DeviceServer):
             dev.set_mix_sideband(sideband)
         return sideband
 
+    @setting(405, "Vatt", vatt=["i"], returns=["i"])
+    def vatt(self, c, vatt=None):
+        dev: QuBE_ControlPort = self.selectedDevice(c)
+        if vatt is None:
+            vatt = dev.get_vatt()
+        else:
+            dev.set_vatt(vatt)
+        return vatt
+
+    @setting(406, "fullscale_current", fullscale_current=["i"], returns=["i"])
+    def fullscale_current(self, c, fullscale_current=None):
+        dev: QuBE_ControlPort = self.selectedDevice(c)
+        if fullscale_current is None:
+            fullscale_current = dev.get_fullscale_current()
+        else:
+            dev.set_fullscale_current(fullscale_current)
+        return fullscale_current
+
     @setting(505, "Internal loopback", enabled=["b"], returns=["b"])
     def internal_loopback(self, c, enabled=None):
         """
@@ -1160,6 +1222,18 @@ class QuBE_Server(DeviceServer):
                 self.release_device(c)
             if _dev_selected is not None:
                 self.selectDevice(c, _dev_selected.name)
+        return True
+
+    @setting(602, "load deskew configuration", path="s", returns=["b"])
+    def load_deskew_conf(self, c, path=None, linkup=False):
+        if path:
+            with open(path) as io:
+                deskew_tools.DeskewConfiguration.model_validate_json(
+                    io.read()
+                )  # checks format
+            self._deskew_conf_filepath = path
+        self._update_deskew_conf()
+        return True
 
 
 def _convert_to_builtin_type(np_array, ensure_list=False):

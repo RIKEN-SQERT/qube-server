@@ -1,8 +1,10 @@
 import copy
+import math
 import random
 from unittest.mock import MagicMock, Mock, create_autospec
 
 import pytest
+import pytest_twisted
 from labrad import types as T
 from labrad.devices import DeviceServer, DeviceWrapper
 from labrad.util import ContextDict
@@ -151,14 +153,14 @@ def test_sequence_length(
         assert actual["ns"] == expected_length
 
 
-def test_daq_trigger_when_little_margin_from_last(
+@pytest_twisted.inlineCallbacks
+def test_daq_trigger(
     qube_server_with_fake_devices: QuBE_Server,
     fake_box_connections,
     context,
     fake_devices,
 ):
     server = qube_server_with_fake_devices
-    dev_A, _, dev_B = fake_devices
     box_conn_a, box_conn_b = fake_box_connections
 
     server.initContext(context)
@@ -182,33 +184,40 @@ def test_daq_trigger_when_little_margin_from_last(
     box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
     box_conn_b.get_current_timecounter.return_value = current_timecounter
 
-    result = server.daq_trigger(context)
+    server._stable_count_proposer.propose_trigger_counts = MagicMock()
+    server._stable_count_proposer.propose_trigger_counts.return_value = {
+        box_conn_a.box_name: 100000,
+        box_conn_b.box_name: 100001,
+    }
+
+    result = yield server.daq_trigger(context)
     assert result is True
 
-    expected_timecounter = int(QSConstants.SYNC_CLOCK * 102.5)
     box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(4, 0)},
         channels={(0, 0), (2, 0), (3, 2)},
-        timecounter=expected_timecounter,
+        timecounter=100000,
     )
     box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
         context.ID,
         runits={(5, 1)},
         channels={(1, 0), (2, 1)},
-        timecounter=expected_timecounter,
+        timecounter=100001,
     )
 
 
-def test_daq_trigger_when_large_margin_from_last(
+@pytest_twisted.inlineCallbacks
+def test_daq_trigger_raises_error_when_a_box_is_busy(
     qube_server_with_fake_devices: QuBE_Server,
     fake_box_connections,
     context,
     fake_devices,
 ):
     server = qube_server_with_fake_devices
-    dev_A, _, dev_B = fake_devices
     box_conn_a, box_conn_b = fake_box_connections
+
+    box_conn_b.is_sequencer_available.return_value = False
 
     server.initContext(context)
 
@@ -241,22 +250,8 @@ def test_daq_trigger_when_large_margin_from_last(
     box_conn_b.start_capture_by_awg_trigger.return_value = (None, None)
     box_conn_b.get_latest_sysref_timecounter.return_value = latest_time_counter
 
-    result = server.daq_trigger(context)
-    assert result is True
-
-    expected_timecounter = int(QSConstants.SYNC_CLOCK * 102.0)
-    box_conn_a.start_capture_by_awg_trigger.assert_called_once_with(
-        context.ID,
-        runits={(4, 0)},
-        channels={(0, 0), (2, 0), (3, 2)},
-        timecounter=expected_timecounter,
-    )
-    box_conn_b.start_capture_by_awg_trigger.assert_called_once_with(
-        context.ID,
-        runits={(5, 1)},
-        channels={(1, 0), (2, 1)},
-        timecounter=expected_timecounter,
-    )
+    with pytest.raises(RuntimeError):
+        yield server.daq_trigger(context)
 
 
 def test_daq_stop(qube_server_with_fake_devices: QuBE_Server):
@@ -420,3 +415,56 @@ def test_sideband_selection(qube_server_with_fake_devices, fake_devices, context
         dev.get_mix_sideband.return_value = sb
         actual = server.sideband_selection(context)
         assert actual == sb
+
+
+def test_vatt(qube_server_with_fake_devices, fake_devices, context):
+    server: QuBE_Server = qube_server_with_fake_devices
+    dev = fake_devices[0]
+    dev.set_vatt = MagicMock()
+    dev.get_vatt = MagicMock()
+    server.select_device(context, dev.name)
+
+    # setter
+    val = 3071
+    server.vatt(context, val)
+    dev.set_vatt.assert_called_once_with(3071)
+
+    # getter
+    dev.get_vatt.return_value = 3070
+    actual = server.vatt(context)
+    assert actual == 3070
+
+
+def test_fullscale_current(qube_server_with_fake_devices, fake_devices, context):
+    server: QuBE_Server = qube_server_with_fake_devices
+    dev = fake_devices[0]
+    dev.set_fullscale_current = MagicMock()
+    dev.get_fullscale_current = MagicMock()
+    server.select_device(context, dev.name)
+
+    # setter
+    val = 3071
+    server.fullscale_current(context, val)
+    dev.set_fullscale_current.assert_called_once_with(3071)
+
+    # getter
+    dev.get_fullscale_current.return_value = 3070
+    actual = server.fullscale_current(context)
+    assert actual == 3070
+
+
+def test_device_delay_offset(qube_server_with_fake_devices, fake_devices, context):
+    server = qube_server_with_fake_devices
+    dev = fake_devices[0]
+    dev.delay_offset = MagicMock()
+    server.select_device(context, dev.name)
+
+    # setter
+    delay_offset_val = T.Value(2, "ns")
+    server.device_delay_offset(context, delay_offset_val)
+    assert math.isclose(dev.delay_offset, 2000)
+
+    # getter
+    dev.delay_offset = -4000
+    actual = server.device_delay_offset(context)
+    assert actual["ps"] == -4000
