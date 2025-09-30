@@ -24,7 +24,7 @@ _ARTIFACT_DIR: str = "artifacts/"
 
 _VARNAME_SKIP_TESTS_WITH_DEVICES = "QS_SKIP_TESTS_WITH_DEVICES"
 _SKIP_TESTS_WITH_DEVICES: bool = (
-    os.getenv(_VARNAME_SKIP_TESTS_WITH_DEVICES) == "True" or True
+    os.getenv(_VARNAME_SKIP_TESTS_WITH_DEVICES, default="True") == "True"
 )
 test_with_devices = pytest.mark.skipif(
     _SKIP_TESTS_WITH_DEVICES,
@@ -138,9 +138,14 @@ def test_readin_readout_with_decimation(qube_server: QuBE_Server, context):
     multipled = np.conjugate(observed) * wavedata_normalized
 
     if _DO_PLOT:
+        plt.figure()
+        plt.plot(observed.real)
+        plt.plot(observed.imag)
+        plt.savefig(_ARTIFACT_DIR + "test_readin_readout_observed.png")
+        plt.figure()
         plt.plot(multipled.real)
         plt.plot(multipled.imag)
-        plt.savefig(_ARTIFACT_DIR + "test_readin_readout.png")
+        plt.savefig(_ARTIFACT_DIR + "test_readin_readout_multiplied.png")
 
     correlation = np.sum(multipled)
     assert np.abs(correlation) > 0.94

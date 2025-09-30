@@ -98,6 +98,14 @@ class BoxConnection:
             )
         return self.box_unsafe
 
+    def is_sequencer_avaliable(self):
+        # This is workaround to stabilize the sequencer inside QuEL devices.
+        if self.box_unsafe.wss.hal.awgctrl.are_busy_any(
+            self.box_unsafe.wss.hal.awgctrl.units
+        ):
+            return False
+        return True
+
     @property
     def box_unsafe(self) -> Quel1Box:
         """
@@ -123,6 +131,8 @@ class BoxConnection:
         channels: Collection[tuple[Quel1PortType, int]],
         timecounter: int,
     ) -> tuple[BoxStartCapunitsByTriggerTask, AbstractStartAwgunitsTask]:
+        if timecounter % 16 != 0:
+            raise RuntimeError("timecounter must be a multiple of 16.")
         self._last_trigger_timecounter = timecounter
         timecounter_raw = timecounter + self._timecounter_offset
         return self.get_box(context_id).start_capture_by_awg_trigger(
@@ -135,6 +145,8 @@ class BoxConnection:
         channels: Collection[tuple[Quel1PortType, int]],
         timecounter: int,
     ) -> AbstractStartAwgunitsTask:
+        if timecounter % 16 != 0:
+            raise RuntimeError("timecounter must be a multiple of 16.")
         self._last_trigger_timecounter = timecounter
         timecounter_raw = timecounter + self._timecounter_offset
         return self.get_box(context_id).start_wavegen(

@@ -17,7 +17,7 @@ from quel_ic_config import (
     Quel1Box,
     Quel1BoxType,
 )
-from twisted.internet import defer, threads
+from twisted.internet import defer, reactor, threads
 from twisted.internet.defer import inlineCallbacks, returnValue
 from typing_extensions import TypeAlias
 
@@ -295,7 +295,7 @@ class QuBE_Server(DeviceServer):
         """
         return True
 
-    @setting(106, "DAQ Trigger", returns=["b"])
+    @setting(105, "DAQ Trigger", returns=["b"])
     def daq_trigger(self, c):
         """
         Start synchronous measurement.
@@ -312,6 +312,23 @@ class QuBE_Server(DeviceServer):
         box_conns = [self._name_to_box_conn[box_name] for box_name in chassis_list]
 
         with locked_boxes(box_conns, c.ID, timeout_duration=BOXLOCK_TIMEOUT_DURATION):
+            for bc in box_conns:
+                # Waits for the sequencer to complete the present wave generation.
+                # This is a workaround to prevent the sequencer from freezing.
+                for _attempt in range(10):
+                    if bc.is_sequencer_avaliable():
+                        break
+                    print(
+                        f"The sequencer of `{bc.box_name}` is not available. retry after 0.1 sec.（{_attempt + 1} / 10）"
+                    )
+                    d = defer.Deferred()
+                    reactor.callLater(0.1, d.callback, None)
+                    yield d  # sleep for a second asynchronously
+                else:
+                    raise RuntimeError(
+                        f"The sequencer of {bc.box_name} is not available."
+                    )
+
             # the first box is used as a tentative master
             cur_timecounter = int(box_conns[0].get_current_timecounter())
             latest_trigger_timecounter = max(
