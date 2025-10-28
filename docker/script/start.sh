@@ -5,30 +5,24 @@ export PYTHONPATH=$PYTHONPATH:$LIB_PATH
 export PYTHONPATH=$PYTHONPATH:$LIB_PATH/quelware/qube_master
 export PYTHONPATH=$PYTHONPATH:$LIB_PATH/measurement_tool_orion:$LIB_PATH/measurement_tool_orion_automation
 export QUBECALIB_PATH_TO_ROOT=$LIB_PATH/qube-calib
+export LABRADNODE=quel021_docker
 
 # make log directory if it doesn't exist
 mkdir -p $HOME/log
 
 # start labrad as a background process
-#labrad &
-export LABRADNODE=kappa_docker
+ulimit -n 65536
 labrad --registry file:///root/config/registry.sqlite < /dev/null >& /root/log/labrad.log &
+
+# env LABRADHOST=localhost \
+#       LABRADPASSWORD=Cooper2e \
+#       labrad &
 
 # save labrad process id
 labrad_pid=$!
 
-# wait until labrad is up and running or timeout
-timeout=30  # maximum number of seconds to wait
-count=0
-# wait until setup.sh script succeeds
-while ! /root/script/setup.sh >& /dev/null; do
-  sleep 1
-  count=$(($count + 1))
-  if [ $count -ge $timeout ]; then
-    echo "Error: labrad did not start within $timeout seconds."
-    exit 1
-  fi
-done
+# ToDo: need to write connection check script instead of sleep (need to wait until labrad starts)
+sleep 5
 
 # start data vault server
 python $LIB_PATH/labrad-servers/data_vault.py >& $HOME/log/data-vault.log &

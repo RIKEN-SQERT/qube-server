@@ -11,7 +11,7 @@ services:
       #- ../QubeServer.py:/root/lib/QubeServer.py
       - ../qubesrv:/root/lib/qubesrv
       - ./config:/root/config
-      - /home/labrad/registry.sqlite:/root/config/registry.sqlite
+      - /home/labrad/labrad/registry.sqlite:/root/config/registry.sqlite
       - ./script:/root/script
       - ./log:/root/log
       - ./work:/root/work
