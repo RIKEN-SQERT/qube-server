@@ -217,6 +217,8 @@ class QuBE_Control_FPGA(QuBE_DeviceBase):
         return resp
 
 
+import traceback
+
 class QuBE_Control_LSI(QuBE_DeviceBase):
 
     @inlineCallbacks
@@ -236,6 +238,7 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
                 #ipaddr_css=iplsi,
                 boxtype=device_type,
             )
+            # TODO: reconnect
             box.reconnect()
             # use only box.css
             self._css = box.css
@@ -251,6 +254,7 @@ class QuBE_Control_LSI(QuBE_DeviceBase):
         except Exception as e:
             print("Exception!!!!!!!!")
             print(sys._getframe().f_code.co_name, e)
+            traceback.print_exc() # DEBUG
 
         yield
 
@@ -318,13 +322,18 @@ class QuBE_ReadoutLine(QuBE_ControlLine):
 
         self.__initialized = False
         try:
+
+            # TODO: 後で消す
+            #print("start QuBE_ReadoutLine")
+
             self._cap_ctrl = kw["cap_ctrl"]
             self._cap_mod_id = kw["cap_mod_id"]
             self._cap_unit = kw["capture_units"]
 
-            #print("QuBE_ReadoutLine kw:", kw)
+            # TODO: 後で消す
+            ##print("QuBE_ReadoutLine kw:", kw)
             self._rx_coarse_frequency = self.get_adc_coarse_frequency()
-            # print(self._name,'rxnco',self._rx_coarse_frequency)
+            #print(self._name,'rxnco',self._rx_coarse_frequency)
             self.__initialized = True
         except Exception as e:
             print("Exception: QuBE_ReadoutLine!!!!!!!!")

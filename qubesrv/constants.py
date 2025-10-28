@@ -117,6 +117,7 @@ class QSConstants:
     # either value is to be specified:
     CNL_CTRL_VAL = "control"  # + the channel is for control
     CNL_READ_VAL = "mux"  # + the channel is for readout
+    CNL_PUMP_VAL = "pump"  # + the channel is for readout
     CNL_MIXCH_TAG = "mixer_ch"  # used in the json config. mixer channel(CNL).
     CNL_MIXSB_TAG = "mixer_sb"  # used in the json config. mixer channel(CNL)
     # side-band selection. Either value can be set

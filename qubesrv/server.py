@@ -85,79 +85,21 @@ class QuBE_Server(DeviceServer):
         )
         return self.deviceWrappers[tag]
 
-    # 例：QuEL-1 Type-A の場合
+    # QuEL-1 SE Riken8 の場合
     # | MxFEの番号 | DAC番号 | (group, line)　 | ポート番号 | 機能 |
-    # |-----------|--------|----------------|-------|------|
+    # |-----------|-------|----------------|-------|--|
     # | 0       | 0     | (0, 0)         | 1     | Read-out |
-    # | 0       | 1     | (0, 1)         | 3     | Pump |
-    # | 0       | 2     | (0, 2)         | 2     | Ctrl |
-    # | 0       | 3     | (0, 3)         | 4     | Ctrl |
-    # | 1       | 3     | (1, 0)         | 8     | Read-out |
-    # | 1       | 2     | (1, 1)         | 10    | Pump |
-    # | 1       | 1     | (1, 2)         | 11    | Ctrl |
-    # | 1       | 0     | (1, 3)         | 9     | Ctrl |
-
-    # 例: QuBE の場合
-    # | MxFEの番号 | DAC番号 | (group, line)　 | ポート番号 | Type-A機能 | Type-B 機能 |
-    # |-----------|--------|----------------|-------|----------|-----------|
-    # | 0       | 0     | (0, 0)         | 0     | Read-out | Ctrl      |
-    # | 0       | 1     | (0, 1)         | 2     | Pump     | Ctrl      |
-    # | 0       | 2     | (0, 2)         | 5     | Ctrl     | Ctrl      |
-    # | 0       | 3     | (0, 3)         | 6     | Ctrl     | Ctrl      |
-    # | 1       | 3     | (1, 0)         | 13    | Read-out | Ctrl      |
-    # | 1       | 2     | (1, 1)         | 11    | Pump     | Ctrl      |
-    # | 1       | 1     | (1, 2)         | 8     | Ctrl     | Ctrl      |
-    # | 1       | 0     | (1, 3)         | 7     | Ctrl     | Ctrl      |
-
-    # ADC用のrlineとrunit
-    # | ポート番号 | 受信LO番号 | MxFEの番号 | ADC番号, CNCO番号, FNCO番号 | (group, rline, runit)　 | キャプチャモジュール | キャプチャユニット |
-    # |----|---|---|---------|------------------------|----|---|
-    # | 0  | 0 | 0 | 3, 3, 5 | (0, r, 0)              | 1  | 4 |
-    # | 0  | 0 | 0 | 3, 3, 5 | (0, r, 1)              | 1  | 5 |
-    # | 0  | 0 | 0 | 3, 3, 5 | (0, r, 2)              | 1  | 6 |
-    # | 0  | 0 | 0 | 3, 3, 5 | (0, r, 3)              | 1  | 7 |
-    # | 5  | 1 | 0 | 2, 2, 4 | (0, m, 0)              | 1  | 4 |
-    # | 5  | 1 | 0 | 2, 2, 4 | (0, m, 1)              | 1  | 5 |
-    # | 5  | 1 | 0 | 2, 2, 4 | (0, m, 2)              | 1  | 6 |
-    # | 5  | 1 | 0 | 2, 2, 4 | (0, m, 3)              | 1  | 7 |
-    # | 7  | 7 | 1 | 3, 3, 5 | (0, r, 0)              | 0  | 0 |
-    # | 7  | 7 | 1 | 3, 3, 5 | (0, r, 1)              | 0  | 1 |
-    # | 7  | 7 | 1 | 3, 3, 5 | (0, r, 2)              | 0  | 2 |
-    # | 7  | 7 | 1 | 3, 3, 5 | (0, r, 3)              | 0  | 3 |
-    # | 12 | 6 | 1 | 2, 2, 4 | (0, m, 0)              | 0  | 0 |
-    # | 12 | 6 | 1 | 2, 2, 4 | (0, m, 1)              | 0  | 1 |
-    # | 12 | 6 | 1 | 2, 2, 4 | (0, m, 2)              | 0  | 2 |
-    # | 12 | 6 | 1 | 2, 2, 4 | (0, m, 3)              | 0  | 3 |
-
-    # # TODO: PossibleLinksで登録するようになったらこれも不要
-    def get_dac_group_line_from_name(self, box, pmaper, name):
-        _, role, port_string = self.parse_qube_device_id(name)
-        if role == "readout":
-            for c in port_string:
-                port = int(c, 16)
-                group, line = pmaper.resolve_line(port)
-                if box._dev.is_output_line(group, line):  # select the output line
-                    break
-        else:
-            port = int(port_string, 16)
-            group, line = pmaper.resolve_line(port)
-        return group, line
-
-    def get_adc_group_line_from_name(self, box, pmaper, name):
-        _, role, port_string = self.parse_qube_device_id(name)
-        if role == "readout":
-            for c in port_string:
-                port = int(c, 16)
-                group, line = pmaper.resolve_line(port)
-                if box._dev.is_input_line(group, line):  # select the input line
-                    break
-        else:
-            raise Exception("Only readout line has adc.")
-        return group, line
+    # | 0       | 1     | (0, 1)         | 1     | Fogi |
+    # | 0       | 2     | (0, 2)         | 2     | Pump |
+    # | 0       | 3     | (0, 3)         | 3     | Ctrl |
+    # | 1       | 0     | (1, 0)         | 6     | Ctrl |
+    # | 1       | 1     | (1, 1)         | 7    | Ctrl |
+    # | 1       | 2     | (1, 2)         | 8    | Ctrl |
+    # | 1       | 3     | (1, 3)         | 9     | Ctrl |
 
     def parse_qube_device_id(self, device_id):
         devicd_id_regexp = re.compile(
-            r"(qube[0-9]{3})-(control|readout|pump)_([0-9a-d]{1,2})"
+            r"(quel1se-[0-9]-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})"
         )
         m = devicd_id_regexp.match(device_id)
         if m:
@@ -167,6 +109,45 @@ class QuBE_Server(DeviceServer):
         else:
             raise ValueError(f"Cannot parse device_id: {device_id}")
         return device_name, port_type, port_string
+
+    def get_dac_group_line_from_name(self, box, pmaper, name):
+        _, role, port_string = self.parse_qube_device_id(name)
+        # if role == "readout":
+        #     for c in port_string:
+        #         port = int(c, 16)
+        #         group, line = pmaper.resolve_line(port)
+        #         if box._dev.is_output_line(group, line):  # select the output line
+        #             break
+        # else:
+        #     port = int(port_string, 16)
+        #     group, line = pmaper.resolve_line(port)
+        # return group, line
+        
+        # TODO: fogi
+        port_group_map = {
+            1: (0,0),
+            2: (0,2),
+            3: (0,3),   
+            6: (1,0),
+            7: (1,1),
+            8: (1,2),
+            9: (1,3)           
+        }
+        #print(f"get_dac_group_line_from_name port_string: {port_string} ")
+        port = int(port_string)
+        return port_group_map.get(port)
+
+    # def get_adc_group_line_from_name(self, box, pmaper, name):
+    #     # _, role, port_string = self.parse_qube_device_id(name)
+    #     # if role == "readout":
+    #     #     for c in port_string:
+    #     #         port = int(c, 16)
+    #     #         group, line = pmaper.resolve_line(port)
+    #     #         if box._dev.is_input_line(group, line):  # select the input line
+    #     #             break
+    #     # else:
+    #     #     raise Exception("Only readout line has adc.")
+    #     return group, line
 
     def instantiateChannel(self, name, channels, awg_ctrl, cap_ctrl, info):
         box_type = self.box_info.get_box_type(name)
@@ -186,11 +167,15 @@ class QuBE_Server(DeviceServer):
             group, line = self.get_dac_group_line_from_name(box, pmaper, name)
             # TODO: rline type:B の場合は、rline = "m" にする？ そうでもないらしい。
             try:
-                group, rline = self.get_adc_group_line_from_name(box, pmaper, name)
+                group, rline = self.get_dac_group_line_from_name(box, pmaper, name)
             except:
                 rline = None
             awg_ch_ids = []
-            chs = box.css._get_channels_of_line(group, line)
+            # TODO: モニター
+            #rline = "m"
+            rline = "r"
+            # print(f"gen_awg() name: {name}, group: {group}, line: {line}, rline: {rline}")
+            chs = box._dev.get_channels_of_line(group, line)
             for i in range(len(chs)):
                 awg_idx = rmap.get_awg_of_channel(group, line, i)
                 awg_ch_ids.append(awg_idx)
@@ -215,12 +200,15 @@ class QuBE_Server(DeviceServer):
             _name, _args, _kw = gen_awg(
                 name, role, chassis, channel, awg_ctrl, cap_ctrl
             )
-
             pmaper = QubePortMapper(box_type_str)
-            # TODO: rline type:B の場合は、rline = "m" にする？ そうでもないらしい。
-            group, rline = self.get_adc_group_line_from_name(box, pmaper, name)
-            cap_mod_id = rmap.get_capture_module_of_rline(group, rline)
+            group, line = self.get_dac_group_line_from_name(box, pmaper, name)
+            #print(f"name: {name}, group: {group}, line: {line}")
+            # TODO: モニター: こちらはモニターの場合でも"r"のままでよい
+            cap_mod_id = rmap.get_capture_module_of_rline(group, "r")
+            #cap_mod_id = rmap.get_capture_module_of_rline(group, "m")
+            #print(f"cap_mod_id: {cap_mod_id}")
             capture_units = CaptureModule.get_units(cap_mod_id)
+            #print(f"capture_units: {capture_units}")
 
             kw = dict(
                 cap_ctrl=cap_ctrl,
@@ -232,8 +220,14 @@ class QuBE_Server(DeviceServer):
 
         devices = []
         for channel in channels:
+            #print(f"instantiateChannel: {channel}")
             channel_type = channel[QSConstants.CNL_TYPE_TAG]
             channel_name = name + "-" + channel[QSConstants.CNL_NAME_TAG]
+            #print(f"channel_type: {channel_type}, channel_name: {channel_name}")
+            # TODO fogiはスキップ
+            if "fogi" in channel_name:
+                continue
+            
             args = (
                 channel_name,
                 channel_type,
@@ -244,7 +238,7 @@ class QuBE_Server(DeviceServer):
             )
             to_be_added = (
                 gen_awg(*args)
-                if channel_type == QSConstants.CNL_CTRL_VAL
+                if channel_type == QSConstants.CNL_CTRL_VAL or channel_type == QSConstants.CNL_PUMP_VAL
                 else (
                     gen_mux(*args) if channel_type == QSConstants.CNL_READ_VAL else None
                 )
@@ -285,17 +279,17 @@ class QuBE_Server(DeviceServer):
 
         for name in self.possibleLinks.keys():
             print(QSMessage.CHECKING_QUBEUNIT.format(name))
-            try:
-                res = pingger(self.possibleLinks[name][QSConstants.SRV_IPFPGA_TAG])
-                if 0 == res:
-                    res = pingger(self.possibleLinks[name][QSConstants.SRV_IPLSI_TAG])
-                if 0 != res:
-                    res = pingger(self.possibleLinks[name][QSConstants.SRV_IPCLK_TAG])
-                if 0 != res:
-                    raise Exception(QSMessage.ERR_HOST_NOTFOUND.format(name))
-            except Exception as e:
-                print(sys._getframe().f_code.co_name, e)
-                continue
+            # try:
+            #     res = pingger(self.possibleLinks[name][QSConstants.SRV_IPFPGA_TAG])
+            #     if 0 == res:
+            #         res = pingger(self.possibleLinks[name][QSConstants.SRV_IPLSI_TAG])
+            #     if 0 != res:
+            #         res = pingger(self.possibleLinks[name][QSConstants.SRV_IPCLK_TAG])
+            #     if 0 != res:
+            #         raise Exception(QSMessage.ERR_HOST_NOTFOUND.format(name))
+            # except Exception as e:
+            #     print(sys._getframe().f_code.co_name, e)
+            #     continue
 
             print(QSMessage.CNCTABLE_QUBEUNIT.format(name))
             devices = self.instantiateQube(name, self.possibleLinks[name])
@@ -745,7 +739,7 @@ class QuBE_Server(DeviceServer):
                     "awg index", 0, dev.number_of_awgs - 1
                 )
             )
-
+        
         resp, number_of_chans, data_length = dev.check_waveform(waveforms, channels)
         if not resp:
             raise ValueError(QSMessage.ERR_INVALID_WAVD.format(number_of_chans))
@@ -1126,6 +1120,8 @@ class QuBE_Server(DeviceServer):
 
         """
         dev = self.selectedDevice(c)
+        # TODO: 後で消す
+        #print(f"dev.device_name: {dev.device_name}")
         if frequency is None:
             resp = dev.get_lo_frequency()
             frequency = T.Value(resp, "MHz")
@@ -1155,19 +1151,29 @@ class QuBE_Server(DeviceServer):
             frequency: v[Hz]
 
         """
+        # TODO: static_check_dac_coarse_frequency
+        # dev = self.selectedDevice(c)
+        # if frequency is None:
+        #     resp = dev.get_dac_coarse_frequency()
+        #     frequency = T.Value(resp, "MHz")
+        # elif dev.static_check_dac_coarse_frequency(frequency["MHz"]):
+        #     dev.set_dac_coarse_frequency(frequency["MHz"])
+        # else:
+        #     raise ValueError(
+        #         QSMessage.ERR_FREQ_SETTING.format(
+        #             "TX Corse NCO", QSConstants.DAC_CNCO_RESOL
+        #         )
+        #     )
+        # return frequency
+
         dev = self.selectedDevice(c)
         if frequency is None:
             resp = dev.get_dac_coarse_frequency()
             frequency = T.Value(resp, "MHz")
-        elif dev.static_check_dac_coarse_frequency(frequency["MHz"]):
-            dev.set_dac_coarse_frequency(frequency["MHz"])
         else:
-            raise ValueError(
-                QSMessage.ERR_FREQ_SETTING.format(
-                    "TX Corse NCO", QSConstants.DAC_CNCO_RESOL
-                )
-            )
+            dev.set_dac_coarse_frequency(frequency["MHz"])
         return frequency
+
 
     @setting(
         402,
@@ -1224,6 +1230,25 @@ class QuBE_Server(DeviceServer):
 
     @setting(403, "Frequency RX NCO", frequency=["v[Hz]"], returns=["v[Hz]"])
     def coarse_rx_nco_frequency(self, c, frequency=None):
+        # dev = self.selectedDevice(c)
+        # if QSConstants.CNL_READ_VAL != dev.device_role:
+        #     raise Exception(
+        #         QSMessage.ERR_INVALID_DEV.format("readout", dev.device_name)
+        #     )
+        # elif frequency is None:
+        #     resp = dev.get_adc_coarse_frequency()
+        #     frequency = T.Value(resp, "MHz")
+        # elif dev.static_check_adc_coarse_frequency(frequency["MHz"]):
+        #     dev.set_adc_coarse_frequency(frequency["MHz"])
+        # else:
+        #     raise ValueError(
+        #         QSMessage.ERR_FREQ_SETTING.format(
+        #             "RX Corse NCO", QSConstants.ADC_CNCO_RESOL
+        #         )
+        #     )
+        # return frequency
+
+        # TODO: static_check_adc_coarse_frequency
         dev = self.selectedDevice(c)
         if QSConstants.CNL_READ_VAL != dev.device_role:
             raise Exception(
@@ -1232,14 +1257,8 @@ class QuBE_Server(DeviceServer):
         elif frequency is None:
             resp = dev.get_adc_coarse_frequency()
             frequency = T.Value(resp, "MHz")
-        elif dev.static_check_adc_coarse_frequency(frequency["MHz"]):
-            dev.set_adc_coarse_frequency(frequency["MHz"])
         else:
-            raise ValueError(
-                QSMessage.ERR_FREQ_SETTING.format(
-                    "RX Corse NCO", QSConstants.ADC_CNCO_RESOL
-                )
-            )
+            dev.set_adc_coarse_frequency(frequency["MHz"])
         return frequency
 
     @setting(404, "Frequency Sideband", sideband=["s"], returns=["s"])
