@@ -9,7 +9,7 @@
 # cd ..
 
 # download quelware
-git clone https://github.com/quel-inc/quelware.git
+git clone -b 0.8.13 https://github.com/quel-inc/quelware.git
 cd quelware/quel_ic_config
 ./download_prebuilt.sh
 tar xfv quelware_prebuilt.tgz  

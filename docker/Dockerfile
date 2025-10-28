@@ -58,11 +58,18 @@ WORKDIR $LIB_PATH
 #     h5py
 
 # not upgrade pip
-RUN pip install pylabrad \
+RUN pip install git+https://github.com/labrad/pylabrad.git@u/maffoo/actions \
     h5py
 
 # install pip dependencies for MT
-RUN pip install tqdm IPython typer scikit-learn lmfit qutip networkx matplotlib numpy scipy
+RUN pip install tqdm IPython typer scikit-learn lmfit qutip networkx matplotlib numpy scipy pygobject==3.50.0
+
+# install quelware
+RUN git clone -b 0.8.13 https://github.com/quel-inc/quelware.git
+WORKDIR $LIB_PATH/quelware/quel_ic_config
+RUN ./download_prebuilt.sh
+RUN tar xfv quelware_prebuilt.tgz 
+RUN pip install -r requirements_simplemulti_standard.txt -r requirements_dev_addon.txt
 
 # back to root directory
 WORKDIR /root

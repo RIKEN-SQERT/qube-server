@@ -7,13 +7,13 @@ services:
     volumes:
       - ./.labrad:/root/.labrad
       - ./lib:/root/lib
-      #- ~/work:/root/lib
-      #- ../QubeServer.py:/root/lib/QubeServer.py
       - ../qubesrv:/root/lib/qubesrv
       - ./config:/root/config
       - ./script:/root/script
       - ./log:/root/log
       - ./work:/root/work
+      - /data1/labrad-data:/root/labrad-data
+      - ../../registry.sqlite:/root/config/registry.sqlite
     network_mode: "host"
     environment:
       - LABRADPORT=7682

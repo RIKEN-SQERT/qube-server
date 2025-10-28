@@ -99,7 +99,7 @@ class QuBE_Server(DeviceServer):
 
     def parse_qube_device_id(self, device_id):
         devicd_id_regexp = re.compile(
-            r"(quel1se-1-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})"
+            r"(quel1se-[0-9]-[0-9]{2})-(control|readout|pump|fogi)_([0-9a-d]{1,2})"
         )
         m = devicd_id_regexp.match(device_id)
         if m:
@@ -238,7 +238,7 @@ class QuBE_Server(DeviceServer):
             )
             to_be_added = (
                 gen_awg(*args)
-                if channel_type == QSConstants.CNL_CTRL_VAL
+                if channel_type == QSConstants.CNL_CTRL_VAL or channel_type == QSConstants.CNL_PUMP_VAL
                 else (
                     gen_mux(*args) if channel_type == QSConstants.CNL_READ_VAL else None
                 )
