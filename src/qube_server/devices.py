@@ -8,13 +8,11 @@ from typing import NamedTuple, Optional, TypedDict, cast
 import numpy as np
 from labrad.devices import DeviceWrapper
 from quel_ic_config import (
-    AwgParam,
     CapParam,
-    CapSection,
     Quel1BoxType,
     Quel1PortType,
-    WaveChunk,
 )
+from quel_ic_config_utils import deskew_tools
 
 from .box_connection import BoxConnection
 from .constants import QSConstants, QSMessage
@@ -164,6 +162,8 @@ class QuBE_DeviceBase(DeviceWrapper):
         print(QSMessage.CONNECTING_CHANNEL.format(self.name))
         self.box_conn: BoxConnection = args.box_conn
         self._type = args.device_type
+        self._delay_offset: int = 0
+        self._delay_compensator = deskew_tools.E7awgDelayCompensator()
         self._initialize(args)
         print(QSMessage.CONNECTED_CHANNEL.format(self.name))
 
@@ -217,6 +217,14 @@ class QuBE_DeviceBase(DeviceWrapper):
     def sequence_length(self, value):  # @sequence_length.setter
         self._seqlen = value
 
+    @property
+    def delay_offset(self):
+        return self._delay_offset
+
+    @delay_offset.setter
+    def delay_offset(self, value_in_ps):
+        self._delay_offset = int(value_in_ps)
+
 
 class QuBE_ControlPort(QuBE_DeviceBase):
     def _initialize(self, args: DeviceConnectionInfoArgs):
@@ -259,20 +267,14 @@ class QuBE_ControlPort(QuBE_DeviceBase):
             )
             // QSConstants.DAC_WORD_IVL
         )
-
-        awg_param = AwgParam(num_wait_word=0, num_repeat=self.number_of_shots)
-        waveform_name = f"{self.name}-{channel}"
         iq = QSConstants.DAC_BITS_POW_HALF * waveform
-        self.box_conn.box_unsafe.register_wavedata(
-            port=self.port_out, channel=channel, name=waveform_name, iq=iq
-        )
-        awg_param.chunks.append(
-            WaveChunk(
-                name_of_wavedata=waveform_name, num_blank_word=wait_words, num_repeat=1
-            )
-        )
-        self.box_conn.box_unsafe.config_channel(
-            port=self.port_out, channel=channel, awg_param=awg_param
+        self.box_conn.prepare_wave_generation(
+            self.port_out,
+            channel,
+            iq,
+            wait_words,
+            num_repeat=self.number_of_shots,
+            delay_ps=self._delay_offset,
         )
         return True
 
@@ -337,6 +339,22 @@ class QuBE_ControlPort(QuBE_DeviceBase):
         freq_in_mhz = freq / 1_000_000
         resp = self.static_check_value(freq_in_mhz, resolution, include_zero=True)
         return resp
+
+    def set_vatt(self, vatt: int):
+        self.box_conn.box_unsafe.config_port(self.port_out, vatt=vatt)
+
+    def get_vatt(self) -> int:
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        return dumped["vatt"]
+
+    def set_fullscale_current(self, fullscale_current: int):
+        self.box_conn.box_unsafe.config_port(
+            self.port_out, fullscale_current=fullscale_current
+        )
+
+    def get_fullscale_current(self) -> int:
+        dumped = self.box_conn.box_unsafe.dump_port(self.port_out)
+        return dumped["fullscale_current"]
 
 
 class QuBE_ReadoutPort(QuBE_ControlPort):
@@ -405,85 +423,28 @@ class QuBE_ReadoutPort(QuBE_ControlPort):
         - The capture word is defined as the four multiple of sampling points. It
           corresponds to 4 * ADC_BBSAMP_IVL = ACQ_CAPW_RESOL (nanoseconds).
         """
-        repetition_word = int(
-            (self.repetition_time + QSConstants.ACQ_CAPW_RESOL // 2)
-            // QSConstants.ACQ_CAPW_RESOL
+        decim, averg, summn = QSConstants.ACQ_MODEFUNC[self._acq_mode[muxch]]
+        cap_param = self.box_conn.update_dsp_mode_setting(
+            CapParam(),
+            np.array(self._fir_coefs[muxch]),
+            (0, (len(self._window_coefs[muxch]) // 4) - 1),
+            self._window_coefs[muxch],
+            self.number_of_shots,
+            decim,
+            averg,
+            summn,
         )
-        param = CapParam()
-        win_word = list()
-        for _s, _e in self.acquisition_window[
-            muxch
-        ]:  # flatten window (start,end) to a series
-            # of timestamps
-            win_word.append(
-                int((_s + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL)
-            )
-            win_word.append(
-                int((_e + QSConstants.ACQ_CAPW_RESOL / 2) // QSConstants.ACQ_CAPW_RESOL)
-            )
-        win_word.append(repetition_word)
 
-        param.num_repeat = int(self.number_of_shots)
-        _s0 = win_word.pop(0)
-        param.num_wait_word = _s0
-        win_word[-1] += _s0  # win_word[-1] is the end time of a single sequence.
-        # As the repeat duration is offset by capture_delay, we have to add the
-        # capture_delay time.
-        idx = 0
-        while len(win_word) > 1:
-            _e = win_word.pop(0)
-            _s = win_word.pop(0)
-            blank_length = _s - _e
-            section_length = _e - _s0
-            _s0 = _s
-            param.sections.append(
-                CapSection(
-                    name=f"{idx}",
-                    num_capture_word=section_length,
-                    num_blank_word=blank_length,
-                )
-            )
-            idx += 1
-
-        self.configure_readout_mode(muxch, param, self._acq_mode[muxch])
-        self.box_conn.box_unsafe.config_runit(
-            port=self.port_in, runit=muxch, capture_param=param
+        self.box_conn.prepare_capture(
+            self.port_in,
+            muxch,
+            self.acquisition_window[muxch],
+            self.repetition_time,
+            cap_param,
+            self.number_of_shots,
+            self.delay_offset,
         )
         return True
-
-    def configure_readout_mode(self, mux, param: CapParam, mode):
-        """
-        Configure readout parametes to acquisition modes.
-
-        It enables and disables decimation, averaging, and summation operations with
-        filter coefficients and the number of averaging.
-
-        Args:
-            param     : e7awgsw.captureparam.CaptureParam
-            mode      : character
-                Acceptable parameters are '1', '2', '3', 'A', 'B'
-        """
-        decim, averg, summn = QSConstants.ACQ_MODEFUNC[mode]
-
-        if decim:
-            # [Decimation] 500MSa/s datapoints are reduced to 125 MSa/s (8ns interval)
-            param.complexfir_coeff = np.array(self._fir_coefs[mux])
-            param.complexfir_enable = True
-            param.decimation_enable = True
-        if averg:
-            # [Averaging] Averaging datapoints for all experiments.
-            param.integration_enable = True
-            param.num_repeat = int(self.number_of_shots)
-        if summn:
-            # [Summation] For a given readout window, the DSP apply complex window filter.
-            # (This is equivalent to the convolution in frequency domain of a filter
-            # function with frequency offset). Then, DSP sums all the datapoints
-            # in the readout window.
-            # resp = self.configure_readout_summation(mux, param, summn)
-            param.sum_enable = True
-            param.sum_range = (0, (len(self._window_coefs[mux]) // 4) - 1)
-            param.window_enable = True
-            param.window_coeff = self._window_coefs[mux]
 
     def set_adc_coarse_frequency(self, freq):
         self.box_conn.box_unsafe.config_port(self.port_in, cnco_freq=freq)

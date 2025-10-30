@@ -24,7 +24,7 @@ _ARTIFACT_DIR: str = "artifacts/"
 
 _VARNAME_SKIP_TESTS_WITH_DEVICES = "QS_SKIP_TESTS_WITH_DEVICES"
 _SKIP_TESTS_WITH_DEVICES: bool = (
-    os.getenv(_VARNAME_SKIP_TESTS_WITH_DEVICES) == "True" or True
+    os.getenv(_VARNAME_SKIP_TESTS_WITH_DEVICES, default="True") == "True"
 )
 test_with_devices = pytest.mark.skipif(
     _SKIP_TESTS_WITH_DEVICES,
@@ -34,7 +34,9 @@ test_with_devices = pytest.mark.skipif(
 
 @pytest.fixture(scope="function")
 def qube_server_base():
-    server = QuBE_Server()
+    server = QuBE_Server(
+        deskew_conf_filepath=os.environ.get("QS_TEST_DESKEW_CONF_PATH", default=None)
+    )
     server.log = MagicMock()
     with open(os.environ["QS_TEST_LINKS_JSON_PATH"]) as fp:
         links = PossibleLinks.model_validate_json(fp.read())
@@ -138,9 +140,14 @@ def test_readin_readout_with_decimation(qube_server: QuBE_Server, context):
     multipled = np.conjugate(observed) * wavedata_normalized
 
     if _DO_PLOT:
+        plt.figure()
+        plt.plot(observed.real)
+        plt.plot(observed.imag)
+        plt.savefig(_ARTIFACT_DIR + "test_readin_readout_observed.png")
+        plt.figure()
         plt.plot(multipled.real)
         plt.plot(multipled.imag)
-        plt.savefig(_ARTIFACT_DIR + "test_readin_readout.png")
+        plt.savefig(_ARTIFACT_DIR + "test_readin_readout_multiplied.png")
 
     correlation = np.sum(multipled)
     assert np.abs(correlation) > 0.94
@@ -183,3 +190,8 @@ def test_reconnect_box(qube_server: QuBE_Server, context):
 def test_relinkup_box(qube_server: QuBE_Server, context):
     box_names = qube_server.list_boxes(context)
     qube_server.reconnect_box(context, box_names[0], linkup=True)
+
+
+@test_with_devices
+def test_reload_deskew_conf(qube_server: QuBE_Server, context):
+    qube_server.load_deskew_conf(context)
