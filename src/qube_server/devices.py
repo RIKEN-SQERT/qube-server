@@ -240,7 +240,7 @@ class QuBE_ControlPort(QuBE_DeviceBase):
 
         errors = []
         if not chans == len(channels):
-            errors.append(QSMessage.ERR_INVALID_WAVD_INCONSISTENT_CH_WF)
+            errors.append(QSMessage.ERR_INVALID_WAVD_INCONSISTENT_CH_WF.format(chans, len(channels)))
         if not all(c in self.channels_of_port for c in channels):
             errors.append(QSMessage.ERR_INVALID_WAVD_NOT_ALL_PORT_CHANNELS)
         if not QSConstants.DAC_WVSAMP_IVL * length == self.sequence_length:
@@ -250,8 +250,10 @@ class QuBE_ControlPort(QuBE_DeviceBase):
             == 0
         ):
             errors.append(QSMessage.ERR_INVALID_WAVD_LENGTH_DIV)
-        if not np.max(np.abs(waveforms)) < 1.0:
-            errors.append(QSMessage.ERR_INVALID_WAVD_MAGNITUDE)
+
+        max_amp = np.max(np.abs(waveforms))
+        if not max_amp < 1.0:
+            errors.append(QSMessage.ERR_INVALID_WAVD_MAGNITUDE.format(max_amp))
 
         return (errors, chans, length)
 

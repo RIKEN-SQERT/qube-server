@@ -149,7 +149,7 @@ class QSMessage:
     ERR_INVALID_WIND = "Invalid window range. "
 
     ERR_INVALID_WAVD = "Invalid waveform data: {}"
-    ERR_INVALID_WAVD_INCONSISTENT_CH_WF = "Inconsistent number of waveforms and channels."
+    ERR_INVALID_WAVD_INCONSISTENT_CH_WF = "Inconsistent number of waveforms: {} and channels: {}."
     ERR_INVALID_WAVD_NOT_ALL_PORT_CHANNELS = "Not all channels are in channels of the port."
     ERR_INVALID_WAVD_MISMATCHED_LEN = (
         "The sequence length in nano-second must be identical to the value set "
@@ -158,7 +158,7 @@ class QSMessage:
     ERR_INVALID_WAVD_LENGTH_DIV = "The data length must be multiple of {}.".format(
         QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
     )
-    ERR_INVALID_WAVD_MAGNITUDE = "The absolute value of complex data is greater than 1."
+    ERR_INVALID_WAVD_MAGNITUDE = "The absolute value of complex data is {}, should be less than 1."
 
     ERR_NOARMED_DAC = "No ready dac channels. "
 
