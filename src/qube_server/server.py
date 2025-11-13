@@ -599,9 +599,9 @@ class QuBE_Server(DeviceServer):
                 QSMessage.ERR_INVALID_ITEM.format("channel", channels_of_port)
             )
 
-        resp, number_of_chans, data_length = dev.check_waveform(waveforms, channels)
-        if not resp:
-            raise ValueError(QSMessage.ERR_INVALID_WAVD.format(number_of_chans))
+        errors, number_of_chans, data_length = dev.check_waveform(waveforms, channels)
+        if errors:
+            raise ValueError(QSMessage.ERR_INVALID_WAVD.format(" ".join(errors)))
 
         for waveform, channel in zip(waveforms, channels):
             dev.upload_waveform(waveform, channel)

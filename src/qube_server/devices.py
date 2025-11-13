@@ -235,29 +235,25 @@ class QuBE_ControlPort(QuBE_DeviceBase):
     def channels_of_port(self):
         return self.box_conn.box_unsafe.get_channels_of_port(self.port_out)
 
-    # TODO: check later
     def check_waveform(self, waveforms, channels):
         chans, length = waveforms.shape
 
-        help = 1
-        resp = chans == len(channels)
-        if resp:
-            resp = all(c in self.channels_of_port for c in channels)
-            help += 1
-        if resp:
-            resp = QSConstants.DAC_WVSAMP_IVL * length == self.sequence_length
-            help += 1
-        if resp:
-            block_restriction = QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
-            resp = 0 == length % block_restriction
-            help += 1
-        if resp:
-            resp = np.max(np.abs(waveforms)) < 1.0
-            help += 1
-        if resp:
-            return (True, chans, length)
-        else:
-            return (False, help, None)
+        errors = []
+        if not chans == len(channels):
+            errors.append(QSMessage.ERR_INVALID_WAVD_INCONSISTENT_CH_WF)
+        if not all(c in self.channels_of_port for c in channels):
+            errors.append(QSMessage.ERR_INVALID_WAVD_NOT_ALL_PORT_CHANNELS)
+        if not QSConstants.DAC_WVSAMP_IVL * length == self.sequence_length:
+            errors.append(QSMessage.ERR_INVALID_WAVD_MISMATCHED_LEN)
+        if not (
+            length % (QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL)
+            == 0
+        ):
+            errors.append(QSMessage.ERR_INVALID_WAVD_LENGTH_DIV)
+        if not np.max(np.abs(waveforms)) < 1.0:
+            errors.append(QSMessage.ERR_INVALID_WAVD_MAGNITUDE)
+
+        return (errors, chans, length)
 
     def upload_waveform(self, waveform, channel):
         wait_words = int(
