@@ -313,7 +313,7 @@ class QuBE_Server(DeviceServer):
                 )
             )
 
-    @setting(105, "DAQ Start", returns=["b"])
+    @setting(104, "DAQ Start", returns=["b"])
     def daq_start(self, c):
         """
         Start data acquisition
@@ -468,7 +468,7 @@ class QuBE_Server(DeviceServer):
         dev = self.selectedDevice(c)
         return len(dev.channels_of_port)
 
-    @setting(112, "Device Delay Offset", t=["v[s]"], returns=["v[s]"])
+    @setting(114, "Device Delay Offset", t=["v[s]"], returns=["v[s]"])
     def device_delay_offset(self, c, t=None):
         dev = self.selectedDevice(c)
         if t is None:
