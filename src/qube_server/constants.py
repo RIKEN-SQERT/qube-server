@@ -150,7 +150,7 @@ class QSMessage:
     ERR_INVALID_WAVD = (
         "Invalid waveform data. "
         + "(1) Inconsistent number of waveforms and channels. "
-        + "(2) The number of channels are less than that of # of awgs. "
+        + "(2) Not all channels are in channels of the port. "
         + "(3) The sequence length in nano-second must be identical to "
         + "the value set by daq_length(). "
         + "(4) The data length must be multiple of {}. ".format(
