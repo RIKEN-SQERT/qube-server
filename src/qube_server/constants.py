@@ -156,7 +156,7 @@ class QSMessage:
         + "(4) The data length must be multiple of {}. ".format(
             QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
         )
-        + "(5) The absolute value of complex data is less than 1. "
+        + "(5) The absolute value of complex data is greater than 1. "
         + "The problem is {}. "
     )
     ERR_NOARMED_DAC = "No ready dac channels. "
