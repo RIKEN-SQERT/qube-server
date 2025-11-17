@@ -147,18 +147,19 @@ class QSMessage:
     ERR_INVALID_RANG = "Invalid range. {} must be between {} and {}. "
     ERR_INVALID_ITEM = "Invalid data. {} must be one of {}. "
     ERR_INVALID_WIND = "Invalid window range. "
-    ERR_INVALID_WAVD = (
-        "Invalid waveform data. "
-        + "(1) Inconsistent number of waveforms and channels. "
-        + "(2) The number of channels are less than that of # of awgs. "
-        + "(3) The sequence length in nano-second must be identical to "
-        + "the value set by daq_length(). "
-        + "(4) The data length must be multiple of {}. ".format(
-            QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
-        )
-        + "(5) The absolute value of complex data is less than 1. "
-        + "The problem is {}. "
+
+    ERR_INVALID_WAVD = "Invalid waveform data: {}"
+    ERR_INVALID_WAVD_INCONSISTENT_CH_WF = "Inconsistent number of waveforms: {} and channels: {}."
+    ERR_INVALID_WAVD_NOT_ALL_PORT_CHANNELS = "Not all channels are in channels of the port."
+    ERR_INVALID_WAVD_MISMATCHED_LEN = (
+        "The sequence length in nano-second must be identical to the value set "
+        "by daq_length()."
     )
+    ERR_INVALID_WAVD_LENGTH_DIV = "The data length must be multiple of {}.".format(
+        QSConstants.DAQ_SEQL_RESOL // QSConstants.DAC_WVSAMP_IVL
+    )
+    ERR_INVALID_WAVD_MAGNITUDE = "The absolute value of complex data is {}, should be less than 1."
+
     ERR_NOARMED_DAC = "No ready dac channels. "
 
     def __init__(self):
