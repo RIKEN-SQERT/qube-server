@@ -304,7 +304,7 @@ def test_upload_waveform(
     wavedata = [[1.0, 1.0j], [-1.0, -1.0]]
 
     dev1.check_awg_channels = Mock(return_value=True)
-    dev1.check_waveform = Mock(return_value=(True, len(channels), len(wavedata[0])))
+    dev1.check_waveform = Mock(return_value=([], len(channels), len(wavedata[0])))
     dev1.upload_waveform = Mock()
     dev1.channels_of_port = {0, 1, 2}
 
