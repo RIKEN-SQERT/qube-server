@@ -165,9 +165,13 @@ class BoxConnection:
         self.box_unsafe.register_wavedata(
             port=port, channel=channel, name=waveform_name, iq=iq
         )
-        awg_param = qi.AwgParam(num_wait_word=0, num_repeat=num_repeat)
+        awg_param = qi.AwgParam(num_wait_word=0)
         awg_param.chunks.append(
-            qi.WaveChunk(name_of_wavedata=waveform_name, num_blank_word=post_blank_word)
+            qi.WaveChunk(
+                name_of_wavedata=waveform_name,
+                num_blank_word=post_blank_word,
+                num_repeat=num_repeat,
+            )
         )
         awg_param = self._delay_compensator.adjust_awg_param(
             awg_param,
