@@ -37,7 +37,7 @@ from .devices import (
     RfSwitchState,
     create_device_connection_infos_from_box_connection,
 )
-from .model import PossibleLinks, Skews
+from .model import BoxLink, PossibleLinks, Skews
 
 BOXLOCK_TIMEOUT_DURATION: Final[float] = 10  # sec
 
@@ -107,8 +107,6 @@ class QuBE_Server(DeviceServer):
             with open(self._chassis_skew_json_filepath) as f:
                 self.chassisSkew = Skews.model_validate_json(f.read())
 
-        yield DeviceServer.initServer(self)
-
         try:
             max_workers = QSConstants.THREAD_MAX_WORKERS
             self._thread_pool = concurrent.futures.ThreadPoolExecutor(
@@ -116,6 +114,9 @@ class QuBE_Server(DeviceServer):
             )  # for a threaded operation
         except Exception as e:
             print(sys._getframe().f_code.co_name, e)
+            raise e
+
+        yield DeviceServer.initServer(self)
 
     def initContext(self, c):
         DeviceServer.initContext(self, c)
@@ -139,39 +140,53 @@ class QuBE_Server(DeviceServer):
             raise ValueError(f"Unknown device type: {type}")
 
     def findDevices(self) -> list[DeviceConnectionInfo]:
-        dev_conn_infos: list[DeviceConnectionInfo] = []
-
         box_name_to_timecounter_offset = {
             b.box_name: b.offset for b in self.chassisSkew.boxes
         }
 
+        def create_box_conn(box_link: BoxLink) -> BoxConnection:
+            print(QSMessage.CHECKING_QUBEUNIT.format(box_link.name))
+            if not is_reachable(box_link.ipaddr_wss):
+                print(
+                    sys._getframe().f_code.co_name,
+                    RuntimeError(QSMessage.ERR_HOST_NOTFOUND.format(box_link.name)),
+                )
+
+            print(QSMessage.CNCTABLE_QUBEUNIT.format(box_link.name))
+
+            def _box_factory():
+                box = Quel1Box.create(
+                    name=box_link.name,
+                    ipaddr_wss=box_link.ipaddr_wss,
+                    boxtype=Quel1BoxType.fromstr(box_link.boxtype),
+                )
+                return box
+
+            box_conn = BoxConnection(
+                box_factory=_box_factory,
+                timecounter_additional_offset=box_name_to_timecounter_offset[
+                    box_link.name
+                ],
+            )
+            return box_conn
+
+        box_conn_futures = dict()
+
+        # initialize box links for those boxes that are not yet in self._name_to_box_conn,
+        # in parallel
         for box_link in self.possibleLinks.boxes:
             if box_link.name not in self._name_to_box_conn:
-                print(QSMessage.CHECKING_QUBEUNIT.format(box_link.name))
-                if not is_reachable(box_link.ipaddr_wss):
-                    print(
-                        sys._getframe().f_code.co_name,
-                        RuntimeError(QSMessage.ERR_HOST_NOTFOUND.format(box_link.name)),
-                    )
-
-                print(QSMessage.CNCTABLE_QUBEUNIT.format(box_link.name))
-
-                def _box_factory():
-                    box = Quel1Box.create(
-                        name=box_link.name,
-                        ipaddr_wss=box_link.ipaddr_wss,
-                        boxtype=Quel1BoxType.fromstr(box_link.boxtype),
-                    )
-                    return box
-
-                box_conn = BoxConnection(
-                    box_factory=_box_factory,
-                    timecounter_additional_offset=box_name_to_timecounter_offset[
-                        box_link.name
-                    ],
+                box_conn_futures[box_link.name] = self._thread_pool.submit(
+                    create_box_conn,
+                    box_link,
                 )
-                self._name_to_box_conn[box_link.name] = box_conn
 
+        for name, box_conn in box_conn_futures.items():
+            self._name_to_box_conn[name] = box_conn.result()
+
+        dev_conn_infos: list[DeviceConnectionInfo] = []
+
+        for box_link in self.possibleLinks.boxes:
             box_conn = self._name_to_box_conn[box_link.name]
             dev_conn_infos.extend(
                 create_device_connection_infos_from_box_connection(box_conn)
